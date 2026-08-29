@@ -1,17 +1,33 @@
+export type BudgetPeriod = 'weekly' | 'monthly' | 'yearly';
+export type RecurringCycle = 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
+
+export interface RecurringItem {
+  id: string;
+  name: string;
+  amount: number;
+  category: string;
+  cycle: RecurringCycle;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   username: string;
   level: number;
-  xp: number; // XP in the current level
+  xp: number;
   coins: number;
-  monthlyBudget: number;
+  budgetPeriod: BudgetPeriod;
+  budgetLimit: number;
+  /** @deprecated use budgetLimit */
+  monthlyBudget?: number;
   streak: number;
-  lastLoginDate: string; // YYYY-MM-DD
+  lastLoginDate: string;
   unlockedAchievements: string[];
   unlockedThemes: string[];
   activeTheme: string;
   activeAvatarFrame: string;
+  recurringExpenses: RecurringItem[];
+  recurringIncome: RecurringItem[];
   createdAt: string;
 }
 
@@ -40,55 +56,133 @@ export interface ShopItem {
   name: string;
   type: 'frame' | 'theme';
   price: number;
-  previewColor: string; // hex or Tailwind class
+  previewColor: string;
 }
 
-// Achievements list
+// ------------------------------------------------------------------
+// Period helpers
+// ------------------------------------------------------------------
+
+/** Multipliers to convert any cycle → yearly amount */
+const CYCLE_TO_YEARLY: Record<RecurringCycle, number> = {
+  weekly: 52,
+  fortnightly: 26,
+  monthly: 12,
+  yearly: 1,
+};
+
+/** Multipliers to convert yearly → target period */
+const YEARLY_TO_PERIOD: Record<BudgetPeriod, number> = {
+  weekly: 1 / 52,
+  monthly: 1 / 12,
+  yearly: 1,
+};
+
+/**
+ * Converts a recurring item's amount to the active budget period.
+ * e.g. $1200/month rent → $276.92/week
+ */
+export const normalizeToPeriod = (
+  amount: number,
+  fromCycle: RecurringCycle,
+  toPeriod: BudgetPeriod
+): number => {
+  const yearlyAmount = amount * CYCLE_TO_YEARLY[fromCycle];
+  return yearlyAmount * YEARLY_TO_PERIOD[toPeriod];
+};
+
+/** Label helpers */
+export const PERIOD_LABELS: Record<BudgetPeriod, string> = {
+  weekly: 'Week',
+  monthly: 'Month',
+  yearly: 'Year',
+};
+
+export const CYCLE_LABELS: Record<RecurringCycle, string> = {
+  weekly: 'Weekly',
+  fortnightly: 'Fortnightly',
+  monthly: 'Monthly',
+  yearly: 'Yearly',
+};
+
+/**
+ * Get the date range [start, end] (inclusive) for a given budget period,
+ * anchored to today.
+ */
+export const getPeriodDateRange = (period: BudgetPeriod): { start: string; end: string } => {
+  const now = new Date();
+  let start: Date;
+  let end: Date;
+
+  if (period === 'weekly') {
+    // Monday → Sunday
+    const day = now.getDay(); // 0=Sun
+    const diffToMon = (day + 6) % 7;
+    start = new Date(now);
+    start.setDate(now.getDate() - diffToMon);
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+  } else if (period === 'monthly') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  } else {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear(), 11, 31);
+  }
+
+  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  return { start: fmt(start), end: fmt(end) };
+};
+
+// ------------------------------------------------------------------
+// Achievements
+// ------------------------------------------------------------------
+
 export const ACHIEVEMENTS: Achievement[] = [
   {
     id: 'first_step',
     title: 'First Venture',
-    description: 'Record your very first transaction (income or expense).',
+    description: 'Record your very first transaction.',
     xpReward: 50,
     coinsReward: 30,
     icon: 'Sword',
-    rarity: 'common'
+    rarity: 'common',
   },
   {
     id: 'income_earner',
     title: 'Loot Drop',
-    description: 'Receive money by recording an income transaction.',
+    description: 'Record your first income transaction.',
     xpReward: 50,
     coinsReward: 30,
     icon: 'Coins',
-    rarity: 'common'
+    rarity: 'common',
   },
   {
     id: 'penny_pincher',
     title: 'Shield Block',
-    description: 'Record an expense without overspending your budget.',
+    description: 'Record an expense without overspending.',
     xpReward: 40,
     coinsReward: 25,
     icon: 'Shield',
-    rarity: 'common'
+    rarity: 'common',
   },
   {
     id: 'strict_saver',
     title: 'Treasure Guardian',
-    description: 'Keep monthly spending below 80% of your total budget limit.',
+    description: 'Keep period spending below 80% of your budget limit.',
     xpReward: 100,
     coinsReward: 80,
     icon: 'Lock',
-    rarity: 'rare'
+    rarity: 'rare',
   },
   {
     id: 'streak_3',
     title: 'Novice Adventurer',
-    description: 'Maintain a 3-day active streak of tracking budgets.',
+    description: 'Maintain a 3-day active streak.',
     xpReward: 80,
     coinsReward: 50,
     icon: 'Flame',
-    rarity: 'common'
+    rarity: 'common',
   },
   {
     id: 'streak_7',
@@ -97,50 +191,54 @@ export const ACHIEVEMENTS: Achievement[] = [
     xpReward: 200,
     coinsReward: 150,
     icon: 'Crown',
-    rarity: 'epic'
+    rarity: 'epic',
   },
   {
     id: 'gold_hoarder',
     title: 'Gringotts Heir',
-    description: 'Amass 500 gold coins in your wallet.',
+    description: 'Amass 500 gold coins.',
     xpReward: 150,
     coinsReward: 100,
     icon: 'Gem',
-    rarity: 'epic'
+    rarity: 'epic',
   },
   {
     id: 'level_5_badge',
     title: 'Guild Master',
-    description: 'Level up your profile to Level 5.',
+    description: 'Reach Level 5.',
     xpReward: 300,
     coinsReward: 200,
     icon: 'Award',
-    rarity: 'legendary'
-  }
+    rarity: 'legendary',
+  },
 ];
 
-// Shop customization catalog
+// ------------------------------------------------------------------
+// Shop
+// ------------------------------------------------------------------
+
 export const SHOP_ITEMS: ShopItem[] = [
-  // Avatar Frames
   { id: 'frame_none', name: 'No Frame', type: 'frame', price: 0, previewColor: 'border-transparent' },
   { id: 'frame_bronze', name: 'Bronze Shield', type: 'frame', price: 100, previewColor: 'border-amber-700 ring-2 ring-amber-800' },
   { id: 'frame_silver', name: 'Silver Aegis', type: 'frame', price: 250, previewColor: 'border-slate-300 ring-2 ring-slate-400' },
   { id: 'frame_gold', name: 'Royal Gold', type: 'frame', price: 500, previewColor: 'border-yellow-400 ring-2 ring-yellow-500 shadow-[0_0_8px_#facc15]' },
   { id: 'frame_neon', name: 'Neon Cyber', type: 'frame', price: 800, previewColor: 'border-purple-500 ring-2 ring-pink-500 shadow-[0_0_12px_#d946ef]' },
-  
-  // Theme Overlays
   { id: 'theme_zinc', name: 'Zinc Dungeon', type: 'theme', price: 0, previewColor: 'bg-zinc-800' },
   { id: 'theme_emerald', name: 'Elven Forest', type: 'theme', price: 200, previewColor: 'bg-emerald-800' },
   { id: 'theme_cyber', name: 'Synthwave Neon', type: 'theme', price: 400, previewColor: 'bg-indigo-900' },
-  { id: 'theme_crimson', name: 'Blood Keep', type: 'theme', price: 400, previewColor: 'bg-rose-950' }
+  { id: 'theme_crimson', name: 'Blood Keep', type: 'theme', price: 400, previewColor: 'bg-rose-950' },
 ];
 
-// Calculate XP required for a given level
-export const getXpNeededForLevel = (level: number): number => {
-  return level * 150;
-};
+// ------------------------------------------------------------------
+// XP helpers
+// ------------------------------------------------------------------
 
-// Check if adding this transaction unlocks new achievements
+export const getXpNeededForLevel = (level: number): number => level * 150;
+
+// ------------------------------------------------------------------
+// Achievement evaluation
+// ------------------------------------------------------------------
+
 export const evaluateAchievements = (
   profile: UserProfile,
   transactions: Transaction[]
@@ -152,7 +250,7 @@ export const evaluateAchievements = (
 
   const unlock = (id: string) => {
     if (!currentUnlocked.has(id)) {
-      const ach = ACHIEVEMENTS.find(a => a.id === id);
+      const ach = ACHIEVEMENTS.find((a) => a.id === id);
       if (ach) {
         newlyUnlocked.push(id);
         extraXp += ach.xpReward;
@@ -161,57 +259,26 @@ export const evaluateAchievements = (
     }
   };
 
-  // 1. First Venture (1st transaction)
-  if (transactions.length > 0) {
-    unlock('first_step');
-  }
+  if (transactions.length > 0) unlock('first_step');
+  if (transactions.some((t) => t.type === 'income')) unlock('income_earner');
+  if (transactions.some((t) => t.type === 'expense')) unlock('penny_pincher');
 
-  // 2. Loot Drop (1st Income)
-  const hasIncome = transactions.some(t => t.type === 'income');
-  if (hasIncome) {
-    unlock('income_earner');
-  }
+  // Period-aware budget check
+  const { start, end } = getPeriodDateRange(profile.budgetPeriod);
+  const periodExpenses = transactions
+    .filter((t) => t.type === 'expense' && t.date >= start && t.date <= end)
+    .reduce((s, t) => s + t.amount, 0);
+  const recurringTotal = (profile.recurringExpenses || []).reduce(
+    (s, r) => s + normalizeToPeriod(r.amount, r.cycle, profile.budgetPeriod),
+    0
+  );
+  const totalSpend = periodExpenses + recurringTotal;
+  if (totalSpend > 0 && totalSpend < profile.budgetLimit * 0.8) unlock('strict_saver');
 
-  // 3. Shield Block (1st Expense)
-  const hasExpense = transactions.some(t => t.type === 'expense');
-  if (hasExpense) {
-    unlock('penny_pincher');
-  }
+  if (profile.streak >= 3) unlock('streak_3');
+  if (profile.streak >= 7) unlock('streak_7');
+  if (profile.coins >= 500) unlock('gold_hoarder');
+  if (profile.level >= 5) unlock('level_5_badge');
 
-  // 4. Treasure Guardian (Spending < 80% monthly budget)
-  // Calculate this month's spending
-  const now = new Date();
-  const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const thisMonthExpenses = transactions
-    .filter(t => t.type === 'expense' && t.date.startsWith(currentYearMonth))
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  if (thisMonthExpenses > 0 && thisMonthExpenses < profile.monthlyBudget * 0.8) {
-    unlock('strict_saver');
-  }
-
-  // 5. Streaks check
-  if (profile.streak >= 3) {
-    unlock('streak_3');
-  }
-  if (profile.streak >= 7) {
-    unlock('streak_7');
-  }
-
-  // 6. Gold Hoarder
-  if (profile.coins >= 500) {
-    unlock('gold_hoarder');
-  }
-
-  // 7. Level 5 Badge
-  if (profile.level >= 5) {
-    unlock('level_5_badge');
-  }
-
-  return {
-    unlockedIds: newlyUnlocked,
-    awardedXp: extraXp,
-    awardedCoins: extraCoins
-  };
+  return { unlockedIds: newlyUnlocked, awardedXp: extraXp, awardedCoins: extraCoins };
 };
-
