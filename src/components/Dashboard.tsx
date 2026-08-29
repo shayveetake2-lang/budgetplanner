@@ -15,13 +15,14 @@ import {
   getPeriodDateRange,
   getAllowanceSpent,
   ALLOWANCE_COLOR_CLASSES,
+  ALLOWANCE_COLORS,
 } from '../utils/gamification';
 import {
   LogOut, Sun, Moon, Flame, Coins, PlusCircle, Trash2, Award, Trophy,
   Sparkles, DollarSign, Settings, Shield, Lock, Sword, Crown, Gem,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ShoppingBag,
   Check, TrendingUp, TrendingDown, User, LayoutDashboard, History,
-  Star, X, PieChart, Info,
+  Star, X, PieChart, Info, Edit3,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { RecurringSection } from './RecurringSection';
@@ -50,6 +51,27 @@ const LIcon: React.FC<{ name: string; className?: string }> = ({ name, className
   }
 };
 
+const EMOJI_OPTIONS = ['🚗', '🍔', '🎮', '🏥', '🛍️', '✈️', '📚', '☕', '💡', '🎵', '🏋️', '🐶', '🎬', '👕', '⚽', '🎯'];
+
+const PRESET_KEYWORDS: Record<string, string[]> = {
+  '🚗': ['transport', 'gas', 'travel', 'fuel', 'transit', 'uber', 'taxi'],
+  '🍔': ['food', 'rations', 'groceries', 'dining', 'restaurant', 'coffee', 'lunch'],
+  '🎮': ['entertainment', 'gaming', 'game', 'steam', 'netflix'],
+  '🏥': ['health', 'medical', 'pharmacy', 'doctor'],
+  '🛍️': ['shopping', 'gear', 'clothes', 'retail'],
+  '✈️': ['flight', 'hotel', 'holiday', 'vacation', 'travel'],
+  '📚': ['education', 'books', 'course', 'subscription'],
+  '☕': ['coffee', 'cafe', 'drinks'],
+  '💡': ['utilities', 'electricity', 'water', 'internet'],
+  '🎵': ['music', 'spotify', 'concert'],
+  '🏋️': ['gym', 'fitness', 'sport'],
+  '🐶': ['pet', 'vet', 'animal'],
+  '🎬': ['cinema', 'movies', 'streaming'],
+  '👕': ['clothing', 'fashion', 'apparel'],
+  '⚽': ['sport', 'team', 'activity'],
+  '🎯': ['misc', 'other', 'hobby'],
+};
+
 // ------------------------------------------------------------------
 // Component
 // ------------------------------------------------------------------
@@ -61,7 +83,11 @@ export const Dashboard: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTxs, setLoadingTxs] = useState(true);
 
-  // Transaction form
+  // Modals visibility
+  const [showTxModal, setShowTxModal] = useState(false);
+  const [showAllowanceFormModal, setShowAllowanceFormModal] = useState(false);
+
+  // Transaction form state
   const [txType, setTxType] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
@@ -70,16 +96,28 @@ export const Dashboard: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
 
+  // Allowance form state
+  const [editAllowanceId, setEditAllowanceId] = useState<string | null>(null);
+  const [allowanceFormError, setAllowanceFormError] = useState('');
+  const [allowanceSaving, setAllowanceSaving] = useState(false);
+  const [allowanceForm, setAllowanceForm] = useState({
+    name: '',
+    icon: '🎯',
+    weeklyBudget: '',
+    color: 'violet' as any,
+    keywords: '',
+  });
+
   // Budget settings
   const [showBudgetSettings, setShowBudgetSettings] = useState(false);
   const [budgetLimitInput, setBudgetLimitInput] = useState('');
 
-  // Pagination & filter
+  // Pagination & filter for history tab
   const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const PER_PAGE = 8;
 
-  // Modals / notifications
+  // Level up celebrate / quests unlocked state
   const [showLevelUpModal, setShowLevelUpModal] = useState(false);
   const [leveledUpTo, setLeveledUpTo] = useState(1);
   const [unlockedNotifications, setUnlockedNotifications] = useState<string[]>([]);
@@ -190,6 +228,81 @@ export const Dashboard: React.FC = () => {
   };
 
   // ------------------------------------------------------------------
+  // Add/Edit Allowance Triggers
+  // ------------------------------------------------------------------
+  const openNewAllowance = () => {
+    setEditAllowanceId(null);
+    setAllowanceForm({
+      name: '',
+      icon: '🎯',
+      weeklyBudget: '',
+      color: 'violet',
+      keywords: '',
+    });
+    setAllowanceFormError('');
+    setShowAllowanceFormModal(true);
+  };
+
+  const openEditAllowance = (a: any) => {
+    setEditAllowanceId(a.id);
+    setAllowanceForm({
+      name: a.name,
+      icon: a.icon,
+      weeklyBudget: String(a.weeklyBudget),
+      color: a.color,
+      keywords: a.matchKeywords.join(', '),
+    });
+    setAllowanceFormError('');
+    setShowAllowanceFormModal(true);
+  };
+
+  const handleEmojiChange = (emoji: string) => {
+    const presetKw = PRESET_KEYWORDS[emoji];
+    setAllowanceForm((f) => ({
+      ...f,
+      icon: emoji,
+      keywords: f.keywords || (presetKw ? presetKw.join(', ') : f.keywords),
+    }));
+  };
+
+  const handleSaveAllowance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!allowanceForm.name.trim()) { setAllowanceFormError('Name is required.'); return; }
+    const budget = parseFloat(allowanceForm.weeklyBudget);
+    if (isNaN(budget) || budget < 0) { setAllowanceFormError('Enter a valid weekly budget.'); return; }
+    const keywords = allowanceForm.keywords.split(',').map((k) => k.trim()).filter(Boolean);
+    if (keywords.length === 0) { setAllowanceFormError('Add at least one keyword.'); return; }
+
+    setAllowanceSaving(true);
+    setAllowanceFormError('');
+    try {
+      if (editAllowanceId) {
+        await dataService.updateAllowance(currentUser.uid, editAllowanceId, {
+          name: allowanceForm.name.trim(),
+          icon: allowanceForm.icon,
+          weeklyBudget: budget,
+          color: allowanceForm.color,
+          matchKeywords: keywords,
+        });
+      } else {
+        await dataService.addAllowance(currentUser.uid, {
+          name: allowanceForm.name.trim(),
+          icon: allowanceForm.icon,
+          weeklyBudget: budget,
+          color: allowanceForm.color,
+          matchKeywords: keywords,
+        });
+      }
+      await refreshProfile();
+      setShowAllowanceFormModal(false);
+    } catch (err: any) {
+      setAllowanceFormError(err.message || 'Failed to save allowance.');
+    } finally {
+      setAllowanceSaving(false);
+    }
+  };
+
+  // ------------------------------------------------------------------
   // Add transaction
   // ------------------------------------------------------------------
   const handleAddTransaction = async (e: React.FormEvent) => {
@@ -250,6 +363,7 @@ export const Dashboard: React.FC = () => {
       }
 
       setAmount(''); setDescription(''); setCategory('');
+      setShowTxModal(false);
     } catch (err: any) {
       setFormError(err.message || 'Failed to save transaction.');
     } finally {
@@ -316,6 +430,9 @@ export const Dashboard: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const paginated = filtered.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE);
 
+  // Recent transactions list for Dashboard
+  const recentTransactions = transactions.slice(0, 4);
+
   // ------------------------------------------------------------------
   // Avatar frame style
   // ------------------------------------------------------------------
@@ -329,7 +446,7 @@ export const Dashboard: React.FC = () => {
       onClick={() => setActiveTab(tab)}
       className={`relative flex flex-col items-center gap-1 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 rounded-xl
         ${activeTab === tab
-          ? 'text-violet-500 dark:text-violet-400 bg-violet-100/80 dark:bg-violet-900/30 shadow-md shadow-violet-500/5'
+          ? 'text-violet-500 dark:text-violet-400 bg-violet-100/80 dark:bg-violet-900/30'
           : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/40'}`}
     >
       {icon}
@@ -367,6 +484,24 @@ export const Dashboard: React.FC = () => {
             <NavBtn tab="shop" icon={<ShoppingBag className="w-4 h-4" />} label="Armory" />
           </nav>
 
+          {/* Action Pop-up triggers in header */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTxModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-xs font-bold transition-all duration-150 shadow-md shadow-violet-500/20 active:scale-95"
+            >
+              <Sword size={13} />
+              <span>+ Log Transaction</span>
+            </button>
+            <button
+              onClick={openNewAllowance}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all active:scale-95"
+            >
+              <PlusCircle size={13} />
+              <span>+ Add Allowance</span>
+            </button>
+          </div>
+
           {/* Right controls */}
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <button
@@ -388,7 +523,6 @@ export const Dashboard: React.FC = () => {
 
       {/* ───── HERO STATS BAR (Gamified Character Banner) ───── */}
       <div className="bg-white dark:bg-[#0c0c0f] border-b border-zinc-200/80 dark:border-zinc-800/80 shadow-sm relative overflow-hidden">
-        {/* Subtle decorative background grid pattern */}
         <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-700/5 [mask-image:linear-gradient(0deg,transparent,white)] pointer-events-none" />
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 relative z-10">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-5 items-center">
@@ -417,7 +551,6 @@ export const Dashboard: React.FC = () => {
                   className="h-full bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 rounded-full transition-all duration-700 ease-out relative"
                   style={{ width: `${xpPct}%` }}
                 >
-                  {/* Shimmer light element */}
                   <span className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.25)_50%,transparent_100%)] animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
                 </div>
               </div>
@@ -472,7 +605,6 @@ export const Dashboard: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {/* Period toggle */}
                   <div className="flex bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/60 rounded-xl p-0.5 gap-0.5">
                     {(['weekly', 'monthly', 'yearly'] as BudgetPeriod[]).map((p) => (
                       <button
@@ -556,7 +688,7 @@ export const Dashboard: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-base font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                  <Star className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
+                  <Star className="w-4.5 h-4.5 text-amber-500" />
                   Active Allowances
                 </h3>
               </div>
@@ -580,7 +712,15 @@ export const Dashboard: React.FC = () => {
                             {allowance.icon}
                           </span>
                           <div>
-                            <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">{allowance.name}</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">{allowance.name}</h4>
+                              <button
+                                onClick={() => openEditAllowance(allowance)}
+                                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-violet-500 transition-colors"
+                              >
+                                <Edit3 size={11} />
+                              </button>
+                            </div>
                             <p className="text-[10px] text-zinc-400 mt-0.5 truncate max-w-[200px]">
                               Matches: {allowance.matchKeywords.join(', ')}
                             </p>
@@ -619,12 +759,50 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* 3. Allowance Configuration Panel */}
-            <AllowanceManager
-              uid={currentUser.uid}
-              allowances={userProfile.allowances || []}
-              onChanged={refreshProfile}
-            />
+            {/* 3. RECENT TRANSACTIONS (Declutters the dashboard by replacing the log form) */}
+            <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                  <History className="w-4 h-4 text-violet-500" />
+                  Recent Journal Logs
+                </h3>
+                <button
+                  onClick={() => { setActiveTab('history'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  className="text-xs font-bold text-violet-500 hover:text-violet-600 transition-colors flex items-center gap-0.5"
+                >
+                  View Full History &rarr;
+                </button>
+              </div>
+
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
+                {recentTransactions.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-zinc-400">No journal logs recorded yet.</div>
+                ) : (
+                  recentTransactions.map((tx) => (
+                    <div key={tx.id} className="flex items-center justify-between py-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                            {tx.description || tx.category}
+                          </span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                            tx.type === 'income' ? 'bg-emerald-100 dark:bg-emerald-950/30 text-emerald-600' : 'bg-rose-100 dark:bg-rose-950/30 text-rose-600'
+                          }`}>
+                            {tx.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-0.5">{tx.date}</p>
+                      </div>
+                      <span className={`font-mono text-sm font-bold ${
+                        tx.type === 'income' ? 'text-emerald-500' : 'text-rose-500'
+                      }`}>
+                        {tx.type === 'income' ? '+' : '-'}${tx.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
             {/* 4. SPENT BREAKDOWN BREAKOUT */}
             {categoryBreakdown.length > 0 && (
@@ -677,94 +855,21 @@ export const Dashboard: React.FC = () => {
               />
             </div>
 
-            {/* 6. Add transaction form */}
-            <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
-              <h3 className="text-base font-black text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
-                <Sword className="w-4 h-4 text-violet-500" />
-                Log a Transaction
-              </h3>
+            {/* 6. Allowance Configurator */}
+            <AllowanceManager
+              uid={currentUser.uid}
+              allowances={userProfile.allowances || []}
+              onChanged={refreshProfile}
+              onAddClick={openNewAllowance}
+              onEditClick={openEditAllowance}
+            />
 
-              {/* Income / Expense toggle */}
-              <div className="grid grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4 border border-zinc-200/80 dark:border-zinc-800/60">
-                {(['expense', 'income'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => { setTxType(t); setCategory(''); }}
-                    className={`py-2.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5
-                      ${txType === t
-                        ? `bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200/50 dark:border-zinc-700/50 ${t === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`
-                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
-                  >
-                    {t === 'expense' ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
-                    {t === 'expense' ? 'Spend Money' : 'Receive Money'}
-                  </button>
-                ))}
-              </div>
-
-              <form onSubmit={handleAddTransaction} className="space-y-4">
-                {formError && (
-                  <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-xs rounded-xl">
-                    {formError}
-                  </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Amount ($)</label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-3 w-3.5 h-3.5 text-zinc-400" />
-                      <input
-                        type="number" step="0.01" required placeholder="0.00"
-                        value={amount} onChange={(e) => setAmount(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Category</label>
-                    <select
-                      required value={category} onChange={(e) => setCategory(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
-                    >
-                      <option value="">-- Category --</option>
-                      {(txType === 'income' ? incomeCategories : expenseCategories).map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Description (optional)</label>
-                    <input
-                      type="text" placeholder="What was it for?"
-                      value={description} onChange={(e) => setDescription(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Date</label>
-                    <input
-                      type="date" required value={date} onChange={(e) => setDate(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="submit" disabled={formLoading}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-violet-500 hover:bg-violet-600 disabled:bg-violet-500/60 text-white shadow-lg shadow-violet-500/25 transition-all active:scale-[0.99] border-b-2 border-violet-700"
-                >
-                  {formLoading
-                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    : <><PlusCircle className="w-4 h-4" /> Log Transaction (+XP &amp; Gold)</>}
-                </button>
-              </form>
-            </div>
           </div>
         )}
 
         {/* ─── HISTORY TAB ─── */}
         {activeTab === 'history' && (
           <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none overflow-hidden">
-            {/* Toolbar */}
             <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-black text-zinc-900 dark:text-white">Transaction History</h3>
@@ -786,7 +891,6 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto">
               {loadingTxs ? (
                 <div className="p-12 text-center text-zinc-500 text-sm">Querying logs…</div>
@@ -817,7 +921,7 @@ export const Dashboard: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-zinc-700 dark:text-zinc-300 hidden sm:table-cell max-w-[200px] truncate">
-                          {tx.description || <span className="italic text-zinc-500">—</span>}
+                          {tx.description || <span className="italic text-zinc-400">—</span>}
                         </td>
                         <td className="px-5 py-3.5 text-right font-bold font-mono whitespace-nowrap">
                           <span className={tx.type === 'income' ? 'text-emerald-500' : 'text-rose-500'}>
@@ -867,7 +971,7 @@ export const Dashboard: React.FC = () => {
             <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
               <Trophy className="w-4 h-4 text-yellow-500" /> Quests &amp; Achievements
             </h3>
-            <p className="text-xs text-zinc-400 mb-4">{userProfile.unlockedAchievements?.length || 0} of {ACHIEVEMENTS.length} completed</p>
+            <p className="text-xs text-zinc-400 mb-4">{(userProfile.unlockedAchievements || []).length} of {ACHIEVEMENTS.length} completed</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {ACHIEVEMENTS.map((ach) => {
                 const unlocked = (userProfile.unlockedAchievements || []).includes(ach.id);
@@ -921,7 +1025,6 @@ export const Dashboard: React.FC = () => {
             </h3>
             <p className="text-xs text-zinc-400 mb-4">Spend gold coins to unlock customizations — <span className="font-extrabold text-amber-500">{userProfile.coins}g available</span></p>
 
-            {/* Frames */}
             <h4 className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider mb-2">Avatar Frames</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-6">
               {SHOP_ITEMS.filter((i) => i.type === 'frame').map((item) => {
@@ -952,7 +1055,6 @@ export const Dashboard: React.FC = () => {
               })}
             </div>
 
-            {/* Themes */}
             <h4 className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider mb-2">Themes</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {SHOP_ITEMS.filter((i) => i.type === 'theme').map((item) => {
@@ -1007,6 +1109,225 @@ export const Dashboard: React.FC = () => {
           </button>
         ))}
       </nav>
+
+      {/* ───── POP-UP MODAL: LOG TRANSACTION ───── */}
+      {showTxModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => setShowTxModal(false)}
+              className="absolute top-4 right-4 p-1 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-black text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
+              <Sword className="w-5 h-5 text-violet-500" />
+              Log a Transaction
+            </h3>
+
+            {/* Income / Expense toggle */}
+            <div className="grid grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4 border border-zinc-200 dark:border-zinc-800">
+              {(['expense', 'income'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { setTxType(t); setCategory(''); }}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5
+                    ${txType === t
+                      ? `bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200/50 dark:border-zinc-700/50 ${t === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                >
+                  {t === 'expense' ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+                  {t === 'expense' ? 'Spend Money' : 'Receive Money'}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleAddTransaction} className="space-y-4">
+              {formError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-xs rounded-xl">
+                  {formError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Amount ($)</label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-3 w-3.5 h-3.5 text-zinc-400" />
+                    <input
+                      type="number" step="0.01" required placeholder="0.00"
+                      value={amount} onChange={(e) => setAmount(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Category</label>
+                  <select
+                    required value={category} onChange={(e) => setCategory(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                  >
+                    <option value="">-- Category --</option>
+                    {(txType === 'income' ? incomeCategories : expenseCategories).map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1 col-span-1 sm:col-span-2">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Description (optional)</label>
+                  <input
+                    type="text" placeholder="What was it for?"
+                    value={description} onChange={(e) => setDescription(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
+                  />
+                </div>
+                <div className="space-y-1 col-span-1 sm:col-span-2">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Date</label>
+                  <input
+                    type="date" required value={date} onChange={(e) => setDate(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit" disabled={formLoading}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm bg-violet-500 hover:bg-violet-600 disabled:bg-violet-500/60 text-white shadow-lg shadow-violet-500/20 transition-all active:scale-[0.99] border-b-2 border-violet-700"
+                >
+                  {formLoading
+                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <><PlusCircle className="w-4 h-4" /> Log Transaction (+XP &amp; Gold)</>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTxModal(false)}
+                  className="px-4 py-3 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───── POP-UP MODAL: ADD / EDIT ALLOWANCE ───── */}
+      {showAllowanceFormModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowAllowanceFormModal(false)}
+              className="absolute top-4 right-4 p-1 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-black text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
+              <PlusCircle className="w-5 h-5 text-violet-500" />
+              {editAllowanceId ? 'Modify Allowance Config' : 'Create New Allowance'}
+            </h3>
+
+            <form onSubmit={handleSaveAllowance} className="space-y-4">
+              {allowanceFormError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-xs rounded-xl">
+                  {allowanceFormError}
+                </div>
+              )}
+
+              {/* Emoji selector */}
+              <div>
+                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2">Select Icon</label>
+                <div className="flex flex-wrap gap-2 max-h-[85px] overflow-y-auto p-1 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900/50">
+                  {EMOJI_OPTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleEmojiChange(emoji)}
+                      className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all duration-150 ${
+                        allowanceForm.icon === emoji
+                          ? 'ring-2 ring-violet-500 bg-violet-100 dark:bg-violet-900/50 scale-110'
+                          : 'hover:bg-gray-200 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Form inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Allowance Name</label>
+                  <input
+                    type="text" required placeholder="e.g. Snack Vault"
+                    value={allowanceForm.name}
+                    onChange={(e) => setAllowanceForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Weekly Budget Limit ($)</label>
+                  <input
+                    type="number" min="0" step="1" required placeholder="e.g. 75"
+                    value={allowanceForm.weeklyBudget}
+                    onChange={(e) => setAllowanceForm((f) => ({ ...f, weeklyBudget: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                  />
+                </div>
+                <div className="space-y-1 col-span-1 sm:col-span-2">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Theme Accent Color</label>
+                  <div className="flex flex-wrap gap-2 p-2 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900/50">
+                    {ALLOWANCE_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setAllowanceForm((f) => ({ ...f, color: c }))}
+                        className={`w-7 h-7 rounded-full transition-all duration-150 ${ALLOWANCE_COLOR_CLASSES[c]?.badge} ${
+                          allowanceForm.color === c ? 'ring-2 ring-offset-2 ring-violet-500 scale-110' : 'hover:scale-105'
+                        }`}
+                        title={c}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1 col-span-1 sm:col-span-2">
+                  <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Matching Keywords (comma separated)</label>
+                  <input
+                    type="text" required placeholder="e.g. food, rations, groceries"
+                    value={allowanceForm.keywords}
+                    onChange={(e) => setAllowanceForm((f) => ({ ...f, keywords: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
+                  />
+                  <p className="text-[9px] text-zinc-400 mt-1">Transactions with category or description containing these words are tracked here.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit" disabled={allowanceSaving}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-xl bg-violet-500 hover:bg-violet-600 text-white font-bold text-sm transition-all duration-200 active:scale-95 disabled:opacity-50 shadow-md shadow-violet-500/25 border-b-2 border-violet-700"
+                >
+                  {allowanceSaving ? (
+                    <span className="animate-pulse">Saving Config…</span>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      {editAllowanceId ? 'Save Changes' : 'Deploy Allowance'}
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllowanceFormModal(false)}
+                  className="px-4 py-3 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-sm hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ───── LEVEL UP MODAL ───── */}
       {showLevelUpModal && (
