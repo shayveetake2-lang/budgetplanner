@@ -2,6 +2,7 @@ import { auth, db, isFirebaseConfigured } from '../firebase';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   onAuthStateChanged as firebaseOnAuthStateChanged,
   User as FirebaseUser,
@@ -243,6 +244,11 @@ export const dataService = {
   async signOut(): Promise<void> {
     if (!isFirebaseConfigured || !auth) { lsSignOut(); return; }
     await firebaseSignOut(auth);
+  },
+
+  async resetPassword(email: string): Promise<void> {
+    if (!isFirebaseConfigured || !auth) return;
+    await sendPasswordResetEmail(auth, email);
   },
 
   onAuthStateChanged(cb: (u: { uid: string; email: string } | null) => void) {

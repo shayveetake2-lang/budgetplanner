@@ -10,11 +10,32 @@ export const AuthScreen: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const handleForgotPassword = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setError(null);
+    setInfoMessage(null);
+    setResetLoading(true);
+    try {
+      await dataService.resetPassword(email.trim());
+      setInfoMessage(`Password reset link sent to ${email.trim()}! Please check your inbox.`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset email.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfoMessage(null);
     setLoading(true);
 
     try {
@@ -88,6 +109,13 @@ export const AuthScreen: React.FC = () => {
 
         {/* Input Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {infoMessage && (
+            <div className="p-3.5 rounded-lg border text-sm flex gap-2.5 items-start bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-400">
+              <Shield className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <span>{infoMessage}</span>
+            </div>
+          )}
+
           {error && (
             <div className="p-3.5 rounded-lg border text-sm flex gap-2.5 items-start bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/30 text-rose-800 dark:text-rose-400">
               <Sword className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -137,9 +165,21 @@ export const AuthScreen: React.FC = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-              Secret Cipher (Password)
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                Secret Cipher (Password)
+              </label>
+              {!isSignUp && dataService.isFirebase && (
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={resetLoading}
+                  className="text-[11px] text-blue-500 hover:text-blue-600 dark:text-blue-400 hover:underline transition-colors disabled:opacity-50"
+                >
+                  {resetLoading ? 'Sending...' : 'Forgot password?'}
+                </button>
+              )}
+            </div>
             <div className="relative">
               <Lock className="absolute left-3 top-2.5 w-4.5 h-4.5 text-zinc-400" />
               <input
