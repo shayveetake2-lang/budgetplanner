@@ -3,12 +3,12 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBVDcQiWjnGO_CPEURzGOOHJDhIWIWHBRA',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'budgetplanner-574d1.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'budgetplanner-574d1',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'budgetplanner-574d1.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '835924994025',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:835924994025:web:65bcfe1c54d17bb1bd8d78',
 };
 
 // Quick verification if environmental credentials are placeholder or actual configuration keys
