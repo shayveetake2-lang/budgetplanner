@@ -9,6 +9,20 @@ export interface RecurringItem {
   cycle: RecurringCycle;
 }
 
+/**
+ * Dynamic allowance — user can add/edit/remove any number.
+ * Spend is auto-matched by checking which transactions categories
+ * contain any keyword from `matchKeywords` (case-insensitive).
+ */
+export interface Allowance {
+  id: string;
+  name: string;
+  icon: string; // emoji
+  weeklyBudget: number;
+  matchKeywords: string[]; // e.g. ['transport', 'gas', 'travel']
+  color: 'sky' | 'amber' | 'violet' | 'emerald' | 'rose' | 'orange' | 'pink' | 'teal';
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -28,7 +42,10 @@ export interface UserProfile {
   activeAvatarFrame: string;
   recurringExpenses: RecurringItem[];
   recurringIncome: RecurringItem[];
+  allowances: Allowance[];
+  /** @deprecated use allowances array */
   weeklyTravelAllowance?: number;
+  /** @deprecated use allowances array */
   weeklyFoodAllowance?: number;
   createdAt: string;
 }
@@ -60,6 +77,41 @@ export interface ShopItem {
   price: number;
   previewColor: string;
 }
+
+// ------------------------------------------------------------------
+// Default Allowances
+// ------------------------------------------------------------------
+export const DEFAULT_ALLOWANCES: Allowance[] = [
+  {
+    id: 'allw_travel',
+    name: 'Travel & Transport',
+    icon: '🚗',
+    weeklyBudget: 100,
+    matchKeywords: ['transport', 'gas', 'travel', 'fuel', 'transit', 'uber', 'taxi'],
+    color: 'sky',
+  },
+  {
+    id: 'allw_food',
+    name: 'Food & Dining',
+    icon: '🍔',
+    weeklyBudget: 200,
+    matchKeywords: ['food', 'rations', 'groceries', 'dining', 'restaurant', 'coffee', 'lunch'],
+    color: 'amber',
+  },
+];
+
+export const ALLOWANCE_COLORS: Allowance['color'][] = ['sky', 'amber', 'violet', 'emerald', 'rose', 'orange', 'pink', 'teal'];
+
+export const ALLOWANCE_COLOR_CLASSES: Record<Allowance['color'], { border: string; text: string; bg: string; bar: string; badge: string }> = {
+  sky:     { border: 'border-sky-200 dark:border-sky-800/50',     text: 'text-sky-600 dark:text-sky-400',     bg: 'bg-sky-100 dark:bg-sky-950/50',     bar: 'from-sky-400 to-blue-500',        badge: 'bg-sky-500' },
+  amber:   { border: 'border-amber-200 dark:border-amber-800/50', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-950/50', bar: 'from-amber-400 to-orange-500',    badge: 'bg-amber-500' },
+  violet:  { border: 'border-violet-200 dark:border-violet-800/50',text: 'text-violet-600 dark:text-violet-400',bg: 'bg-violet-100 dark:bg-violet-950/50',bar: 'from-violet-400 to-purple-500', badge: 'bg-violet-500' },
+  emerald: { border: 'border-emerald-200 dark:border-emerald-800/50',text: 'text-emerald-600 dark:text-emerald-400',bg: 'bg-emerald-100 dark:bg-emerald-950/50',bar: 'from-emerald-400 to-green-500', badge: 'bg-emerald-500' },
+  rose:    { border: 'border-rose-200 dark:border-rose-800/50',   text: 'text-rose-600 dark:text-rose-400',   bg: 'bg-rose-100 dark:bg-rose-950/50',   bar: 'from-rose-400 to-pink-500',       badge: 'bg-rose-500' },
+  orange:  { border: 'border-orange-200 dark:border-orange-800/50',text: 'text-orange-600 dark:text-orange-400',bg: 'bg-orange-100 dark:bg-orange-950/50',bar: 'from-orange-400 to-red-500',     badge: 'bg-orange-500' },
+  pink:    { border: 'border-pink-200 dark:border-pink-800/50',   text: 'text-pink-600 dark:text-pink-400',   bg: 'bg-pink-100 dark:bg-pink-950/50',   bar: 'from-pink-400 to-rose-500',       badge: 'bg-pink-500' },
+  teal:    { border: 'border-teal-200 dark:border-teal-800/50',   text: 'text-teal-600 dark:text-teal-400',   bg: 'bg-teal-100 dark:bg-teal-950/50',   bar: 'from-teal-400 to-cyan-500',       badge: 'bg-teal-500' },
+};
 
 // ------------------------------------------------------------------
 // Period helpers
@@ -135,6 +187,30 @@ export const getPeriodDateRange = (period: BudgetPeriod): { start: string; end: 
   const fmt = (d: Date) => d.toISOString().split('T')[0];
   return { start: fmt(start), end: fmt(end) };
 };
+
+// ------------------------------------------------------------------
+// Allowance spending calculator
+// ------------------------------------------------------------------
+
+/**
+ * Computes how much has been spent against an allowance this week.
+ * Matches by checking if the transaction category contains any keyword.
+ */
+export const getAllowanceSpent = (
+  allowance: Allowance,
+  transactions: Transaction[],
+  weekStart: string,
+  weekEnd: string
+): number =>
+  transactions
+    .filter((t) => {
+      if (t.type !== 'expense') return false;
+      if (t.date < weekStart || t.date > weekEnd) return false;
+      const cat = t.category.toLowerCase();
+      const desc = t.description.toLowerCase();
+      return allowance.matchKeywords.some((k) => cat.includes(k.toLowerCase()) || desc.includes(k.toLowerCase()));
+    })
+    .reduce((s, t) => s + t.amount, 0);
 
 // ------------------------------------------------------------------
 // Achievements

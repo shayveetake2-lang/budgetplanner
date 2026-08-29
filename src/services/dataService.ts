@@ -19,7 +19,13 @@ import {
   orderBy,
   deleteDoc,
 } from 'firebase/firestore';
-import { UserProfile, Transaction, RecurringItem } from '../utils/gamification';
+import {
+  UserProfile,
+  Transaction,
+  RecurringItem,
+  Allowance,
+  DEFAULT_ALLOWANCES,
+} from '../utils/gamification';
 
 // ------------------------------------------------------------------
 // Date helpers
@@ -51,35 +57,49 @@ const buildDefaultProfile = (uid: string, email: string, username: string): User
   activeAvatarFrame: 'frame_none',
   recurringExpenses: [],
   recurringIncome: [],
-  weeklyTravelAllowance: 100,
-  weeklyFoodAllowance: 200,
+  allowances: DEFAULT_ALLOWANCES,
   createdAt: new Date().toISOString(),
 });
 
 // ------------------------------------------------------------------
 // Back-fill helper (for old profiles missing new fields)
 // ------------------------------------------------------------------
-const backfillProfile = (data: Record<string, unknown>): UserProfile => ({
-  uid: (data.uid as string) || '',
-  email: (data.email as string) || '',
-  username: (data.username as string) || '',
-  level: (data.level as number) || 1,
-  xp: (data.xp as number) || 0,
-  coins: (data.coins as number) || 0,
-  budgetPeriod: (data.budgetPeriod as UserProfile['budgetPeriod']) || 'monthly',
-  budgetLimit: (data.budgetLimit as number) || (data.monthlyBudget as number) || 1000,
-  streak: (data.streak as number) || 1,
-  lastLoginDate: (data.lastLoginDate as string) || getTodayDateString(),
-  unlockedAchievements: (data.unlockedAchievements as string[]) || [],
-  unlockedThemes: (data.unlockedThemes as string[]) || ['theme_zinc'],
-  activeTheme: (data.activeTheme as string) || 'theme_zinc',
-  activeAvatarFrame: (data.activeAvatarFrame as string) || 'frame_none',
-  recurringExpenses: (data.recurringExpenses as RecurringItem[]) || [],
-  recurringIncome: (data.recurringIncome as RecurringItem[]) || [],
-  weeklyTravelAllowance: typeof data.weeklyTravelAllowance === 'number' ? data.weeklyTravelAllowance : 100,
-  weeklyFoodAllowance: typeof data.weeklyFoodAllowance === 'number' ? data.weeklyFoodAllowance : 200,
-  createdAt: (data.createdAt as string) || new Date().toISOString(),
-});
+const backfillProfile = (data: Record<string, unknown>): UserProfile => {
+  // Migration: if old profile has no allowances[], migrate from deprecated scalar fields
+  let allowances: Allowance[] = (data.allowances as Allowance[] | undefined) || [];
+  if (!allowances || allowances.length === 0) {
+    allowances = DEFAULT_ALLOWANCES.map((a) => {
+      if (a.id === 'allw_travel') {
+        return { ...a, weeklyBudget: typeof data.weeklyTravelAllowance === 'number' ? data.weeklyTravelAllowance : a.weeklyBudget };
+      }
+      if (a.id === 'allw_food') {
+        return { ...a, weeklyBudget: typeof data.weeklyFoodAllowance === 'number' ? data.weeklyFoodAllowance : a.weeklyBudget };
+      }
+      return a;
+    });
+  }
+
+  return {
+    uid: (data.uid as string) || '',
+    email: (data.email as string) || '',
+    username: (data.username as string) || '',
+    level: (data.level as number) || 1,
+    xp: (data.xp as number) || 0,
+    coins: (data.coins as number) || 0,
+    budgetPeriod: (data.budgetPeriod as UserProfile['budgetPeriod']) || 'monthly',
+    budgetLimit: (data.budgetLimit as number) || (data.monthlyBudget as number) || 1000,
+    streak: (data.streak as number) || 1,
+    lastLoginDate: (data.lastLoginDate as string) || getTodayDateString(),
+    unlockedAchievements: (data.unlockedAchievements as string[]) || [],
+    unlockedThemes: (data.unlockedThemes as string[]) || ['theme_zinc'],
+    activeTheme: (data.activeTheme as string) || 'theme_zinc',
+    activeAvatarFrame: (data.activeAvatarFrame as string) || 'frame_none',
+    recurringExpenses: (data.recurringExpenses as RecurringItem[]) || [],
+    recurringIncome: (data.recurringIncome as RecurringItem[]) || [],
+    allowances,
+    createdAt: (data.createdAt as string) || new Date().toISOString(),
+  };
+};
 
 // ------------------------------------------------------------------
 // Streak logic
@@ -218,6 +238,27 @@ const lsDeleteRecurring = async (uid: string, type: 'income' | 'expense', itemId
   lsWriteProfile(uid, { ...profile, [key]: profile[key].filter((r) => r.id !== itemId) });
 };
 
+// Allowance LS helpers
+const lsAddAllowance = async (uid: string, allowance: Omit<Allowance, 'id'>): Promise<Allowance> => {
+  const profile = await lsGetProfile(uid);
+  const newItem: Allowance = { ...allowance, id: 'allw_' + Math.random().toString(36).slice(2, 10) };
+  lsWriteProfile(uid, { ...profile, allowances: [...profile.allowances, newItem] });
+  return newItem;
+};
+
+const lsUpdateAllowance = async (uid: string, id: string, fields: Partial<Omit<Allowance, 'id'>>): Promise<void> => {
+  const profile = await lsGetProfile(uid);
+  lsWriteProfile(uid, {
+    ...profile,
+    allowances: profile.allowances.map((a) => (a.id === id ? { ...a, ...fields } : a)),
+  });
+};
+
+const lsDeleteAllowance = async (uid: string, id: string): Promise<void> => {
+  const profile = await lsGetProfile(uid);
+  lsWriteProfile(uid, { ...profile, allowances: profile.allowances.filter((a) => a.id !== id) });
+};
+
 // ------------------------------------------------------------------
 // DUAL-MODE DATA SERVICE (exported)
 // ------------------------------------------------------------------
@@ -312,5 +353,32 @@ export const dataService = {
     const key = type === 'income' ? 'recurringIncome' : 'recurringExpenses';
     const updated = profile[key].filter((r) => r.id !== itemId);
     await updateDoc(doc(db, 'users', uid), { [key]: updated });
+  },
+
+  // ------------------------------------------------------------------
+  // Allowance CRUD
+  // ------------------------------------------------------------------
+
+  async addAllowance(uid: string, allowance: Omit<Allowance, 'id'>): Promise<Allowance> {
+    if (!isFirebaseConfigured || !db) return lsAddAllowance(uid, allowance);
+    const profile = await this.getUserProfile(uid);
+    const newItem: Allowance = { ...allowance, id: 'allw_' + Date.now().toString(36) };
+    const updated = [...(profile.allowances || []), newItem];
+    await updateDoc(doc(db, 'users', uid), { allowances: updated });
+    return newItem;
+  },
+
+  async updateAllowance(uid: string, id: string, fields: Partial<Omit<Allowance, 'id'>>): Promise<void> {
+    if (!isFirebaseConfigured || !db) { await lsUpdateAllowance(uid, id, fields); return; }
+    const profile = await this.getUserProfile(uid);
+    const updated = (profile.allowances || []).map((a) => (a.id === id ? { ...a, ...fields } : a));
+    await updateDoc(doc(db, 'users', uid), { allowances: updated });
+  },
+
+  async deleteAllowance(uid: string, id: string): Promise<void> {
+    if (!isFirebaseConfigured || !db) { await lsDeleteAllowance(uid, id); return; }
+    const profile = await this.getUserProfile(uid);
+    const updated = (profile.allowances || []).filter((a) => a.id !== id);
+    await updateDoc(doc(db, 'users', uid), { allowances: updated });
   },
 };

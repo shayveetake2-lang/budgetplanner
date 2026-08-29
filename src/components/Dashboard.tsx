@@ -13,16 +13,19 @@ import {
   evaluateAchievements,
   normalizeToPeriod,
   getPeriodDateRange,
+  getAllowanceSpent,
+  ALLOWANCE_COLOR_CLASSES,
 } from '../utils/gamification';
 import {
   LogOut, Sun, Moon, Flame, Coins, PlusCircle, Trash2, Award, Trophy,
   Sparkles, DollarSign, Settings, Shield, Lock, Sword, Crown, Gem,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ShoppingBag,
   Check, TrendingUp, TrendingDown, User, LayoutDashboard, History,
-  Star, X, Car, Utensils, Edit3, PieChart,
+  Star, X, PieChart, Info,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { RecurringSection } from './RecurringSection';
+import { AllowanceManager } from './AllowanceManager';
 
 // ------------------------------------------------------------------
 // Types
@@ -51,7 +54,7 @@ const LIcon: React.FC<{ name: string; className?: string }> = ({ name, className
 // Component
 // ------------------------------------------------------------------
 export const Dashboard: React.FC = () => {
-  const { currentUser, userProfile, signOut, updateProfile } = useAuth();
+  const { currentUser, userProfile, signOut, updateProfile, refreshProfile } = useAuth();
 
   const [isDark, setIsDark] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -70,12 +73,6 @@ export const Dashboard: React.FC = () => {
   // Budget settings
   const [showBudgetSettings, setShowBudgetSettings] = useState(false);
   const [budgetLimitInput, setBudgetLimitInput] = useState('');
-
-  // Allowance edit modal state
-  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
-  const [travelInput, setTravelInput] = useState('');
-  const [foodInput, setFoodInput] = useState('');
-  const [savingAllowances, setSavingAllowances] = useState(false);
 
   // Pagination & filter
   const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -104,10 +101,10 @@ export const Dashboard: React.FC = () => {
 
   if (!userProfile || !currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-[#09090b]">
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-white">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-semibold text-zinc-500">Loading character…</p>
+          <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-semibold text-zinc-400">Loading character profile…</p>
         </div>
       </div>
     );
@@ -140,52 +137,18 @@ export const Dashboard: React.FC = () => {
   const remainingBudget = Math.max(0, budgetLimit - totalSpend);
   const hpPct = budgetLimit > 0 ? (remainingBudget / budgetLimit) * 100 : 0;
 
-  let hpBarColor = 'bg-emerald-500';
-  let hpGlowClass = '';
+  let hpBarColor = 'bg-gradient-to-r from-emerald-400 to-green-500';
+  let hpGlowClass = 'shadow-[0_0_15px_rgba(16,185,129,0.15)] border-emerald-500/20';
   let hpStatusText = 'Healthy ✅';
   if (hpPct <= 20) {
-    hpBarColor = 'bg-rose-500';
-    hpGlowClass = 'shadow-[0_0_12px_rgba(239,68,68,0.4)] border-rose-500 animate-pulse-border';
+    hpBarColor = 'bg-gradient-to-r from-rose-500 to-red-600 animate-pulse';
+    hpGlowClass = 'shadow-[0_0_20px_rgba(239,68,68,0.35)] border-rose-500/50 animate-pulse';
     hpStatusText = 'Critical ⚠️';
   } else if (hpPct <= 50) {
-    hpBarColor = 'bg-amber-500';
-    hpGlowClass = 'shadow-[0_0_8px_rgba(245,158,11,0.3)] border-amber-400';
+    hpBarColor = 'bg-gradient-to-r from-amber-400 to-orange-500';
+    hpGlowClass = 'shadow-[0_0_15px_rgba(245,158,11,0.25)] border-amber-500/30';
     hpStatusText = 'Wounded 🟡';
   }
-
-  // ------------------------------------------------------------------
-  // Weekly Allowances Math
-  // ------------------------------------------------------------------
-  const { start: weekStart, end: weekEnd } = getPeriodDateRange('weekly');
-
-  const weeklyTravelAllowance = userProfile.weeklyTravelAllowance ?? 100;
-  const weeklyFoodAllowance = userProfile.weeklyFoodAllowance ?? 200;
-
-  const weeklyTravelSpent = transactions
-    .filter((t) =>
-      t.type === 'expense' &&
-      (t.category.toLowerCase().includes('transport') ||
-       t.category.toLowerCase().includes('gas') ||
-       t.category.toLowerCase().includes('travel')) &&
-      t.date >= weekStart && t.date <= weekEnd
-    )
-    .reduce((s, t) => s + t.amount, 0);
-
-  const weeklyFoodSpent = transactions
-    .filter((t) =>
-      t.type === 'expense' &&
-      (t.category.toLowerCase().includes('food') ||
-       t.category.toLowerCase().includes('rations') ||
-       t.category.toLowerCase().includes('groceries')) &&
-      t.date >= weekStart && t.date <= weekEnd
-    )
-    .reduce((s, t) => s + t.amount, 0);
-
-  const travelRemaining = Math.max(0, weeklyTravelAllowance - weeklyTravelSpent);
-  const foodRemaining = Math.max(0, weeklyFoodAllowance - weeklyFoodSpent);
-
-  const travelPct = weeklyTravelAllowance > 0 ? Math.min(100, (weeklyTravelSpent / weeklyTravelAllowance) * 100) : 0;
-  const foodPct = weeklyFoodAllowance > 0 ? Math.min(100, (weeklyFoodSpent / weeklyFoodAllowance) * 100) : 0;
 
   // XP
   const xpNeeded = getXpNeededForLevel(userProfile.level);
@@ -227,33 +190,6 @@ export const Dashboard: React.FC = () => {
   };
 
   // ------------------------------------------------------------------
-  // Allowances save
-  // ------------------------------------------------------------------
-  const handleSaveAllowances = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingAllowances(true);
-    try {
-      const tVal = parseFloat(travelInput);
-      const fVal = parseFloat(foodInput);
-      const updates: Partial<UserProfile> = {};
-      if (!isNaN(tVal) && tVal >= 0) updates.weeklyTravelAllowance = tVal;
-      if (!isNaN(fVal) && fVal >= 0) updates.weeklyFoodAllowance = fVal;
-      await updateProfile(updates);
-      setShowAllowanceModal(false);
-    } catch (err: any) {
-      alert(err.message || 'Failed to save allowances.');
-    } finally {
-      setSavingAllowances(false);
-    }
-  };
-
-  const openAllowanceModal = () => {
-    setTravelInput(weeklyTravelAllowance.toString());
-    setFoodInput(weeklyFoodAllowance.toString());
-    setShowAllowanceModal(true);
-  };
-
-  // ------------------------------------------------------------------
   // Add transaction
   // ------------------------------------------------------------------
   const handleAddTransaction = async (e: React.FormEvent) => {
@@ -272,8 +208,8 @@ export const Dashboard: React.FC = () => {
       setTransactions(updatedTxs);
 
       // XP / coins
-      let xpGain = txType === 'income' ? 10 : (totalSpend + val <= budgetLimit ? 5 : 0);
-      let coinGain = txType === 'income' ? 5 : (totalSpend + val <= budgetLimit ? 2 : 0);
+      let xpGain = txType === 'income' ? 15 : (totalSpend + val <= budgetLimit ? 10 : 0);
+      let coinGain = txType === 'income' ? 10 : (totalSpend + val <= budgetLimit ? 5 : 0);
 
       let newXp = userProfile.xp + xpGain;
       let newLevel = userProfile.level;
@@ -299,7 +235,7 @@ export const Dashboard: React.FC = () => {
         leveled = true;
       }
 
-      const newUnlocked = [...userProfile.unlockedAchievements, ...achResult.unlockedIds];
+      const newUnlocked = [...(userProfile.unlockedAchievements || []), ...achResult.unlockedIds];
       await updateProfile({ level: newLevel, xp: newXp, coins: newCoins, unlockedAchievements: newUnlocked });
 
       if (leveled) {
@@ -391,55 +327,57 @@ export const Dashboard: React.FC = () => {
   const NavBtn = ({ tab, icon, label }: { tab: Tab; icon: React.ReactNode; label: string }) => (
     <button
       onClick={() => setActiveTab(tab)}
-      className={`flex flex-col items-center gap-0.5 px-3 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors rounded-xl
+      className={`relative flex flex-col items-center gap-1 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all duration-300 rounded-xl
         ${activeTab === tab
-          ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-          : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          ? 'text-violet-500 dark:text-violet-400 bg-violet-100/80 dark:bg-violet-900/30 shadow-md shadow-violet-500/5'
+          : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/40'}`}
     >
       {icon}
       <span className="hidden sm:block">{label}</span>
+      {activeTab === tab && (
+        <span className="absolute bottom-1 w-1.5 h-1.5 bg-violet-500 rounded-full sm:hidden" />
+      )}
     </button>
   );
 
-  // ------------------------------------------------------------------
-  // JSX
-  // ------------------------------------------------------------------
+  const { start: weekStart, end: weekEnd } = getPeriodDateRange('weekly');
+
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-[#09090b] transition-colors duration-300">
+    <div className="min-h-screen bg-zinc-50 dark:bg-[#070708] text-zinc-950 dark:text-zinc-50 transition-colors duration-300 font-sans pb-24 md:pb-8">
 
       {/* ───── HEADER ───── */}
-      <header className="sticky top-0 z-30 bg-white/90 dark:bg-[#0c0c0f]/90 backdrop-blur border-b border-zinc-200 dark:border-zinc-800">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14 gap-3">
+      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0c0c0f]/95 backdrop-blur-md border-b border-zinc-200/80 dark:border-zinc-800/80 shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-3">
 
           {/* Logo */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            <span className="p-2 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-600 text-white shadow-lg shadow-violet-600/35">
               <Shield className="w-5 h-5" />
             </span>
-            <span className="text-lg font-black tracking-tight text-zinc-950 dark:text-zinc-50">
-              Budget<span className="text-blue-500 dark:text-blue-400">RPG</span>
+            <span className="text-xl font-black tracking-tight text-zinc-900 dark:text-white">
+              Budget<span className="bg-gradient-to-r from-violet-500 to-indigo-500 bg-clip-text text-transparent">RPG</span>
             </span>
           </div>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-2">
             <NavBtn tab="dashboard" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" />
             <NavBtn tab="history" icon={<History className="w-4 h-4" />} label="History" />
             <NavBtn tab="achievements" icon={<Trophy className="w-4 h-4" />} label="Quests" />
-            <NavBtn tab="shop" icon={<ShoppingBag className="w-4 h-4" />} label="Shop" />
+            <NavBtn tab="shop" icon={<ShoppingBag className="w-4 h-4" />} label="Armory" />
           </nav>
 
           {/* Right controls */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2.5 flex-shrink-0">
             <button
               onClick={() => setIsDark(!isDark)}
-              className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+              className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800/60 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95"
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <button
               onClick={signOut}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-rose-100 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200/50 dark:border-rose-950/40 bg-rose-50/50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-100/80 dark:hover:bg-rose-900/35 transition-all active:scale-95"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Sign Out</span>
@@ -448,94 +386,101 @@ export const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* ───── HERO STATS BAR ───── */}
-      <div className="bg-white dark:bg-[#0c0c0f] border-b border-zinc-200 dark:border-zinc-800">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-center">
+      {/* ───── HERO STATS BAR (Gamified Character Banner) ───── */}
+      <div className="bg-white dark:bg-[#0c0c0f] border-b border-zinc-200/80 dark:border-zinc-800/80 shadow-sm relative overflow-hidden">
+        {/* Subtle decorative background grid pattern */}
+        <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-700/5 [mask-image:linear-gradient(0deg,transparent,white)] pointer-events-none" />
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 relative z-10">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-5 items-center">
 
-            {/* Avatar + name */}
-            <div className="flex items-center gap-3 col-span-2 sm:col-span-1">
-              <div className={`w-12 h-12 rounded-full border-4 flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 flex-shrink-0 ${frameCls}`}>
-                <User className="w-6 h-6 text-zinc-400" />
+            {/* Avatar frame container */}
+            <div className="flex items-center gap-4 col-span-1 sm:col-span-1">
+              <div className={`w-14 h-14 rounded-full border-4 flex items-center justify-center bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-900 flex-shrink-0 shadow-inner ${frameCls} transition-all duration-300`}>
+                <User className="w-7 h-7 text-zinc-400 dark:text-zinc-500" />
               </div>
               <div className="min-w-0">
-                <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate">{userProfile.username}</p>
-                <span className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                <p className="font-extrabold text-base text-zinc-900 dark:text-white truncate">{userProfile.username}</p>
+                <span className="inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/20 mt-1">
                   LVL {userProfile.level}
                 </span>
               </div>
             </div>
 
-            {/* XP bar */}
-            <div className="col-span-2 sm:col-span-1 space-y-1">
-              <div className="flex justify-between text-[10px] font-mono text-zinc-500">
-                <span>XP</span>
+            {/* XP bar with shimmer effect */}
+            <div className="col-span-1 sm:col-span-1 space-y-1.5">
+              <div className="flex justify-between text-[11px] font-bold font-mono text-zinc-500 dark:text-zinc-400">
+                <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-violet-500" /> XP Progress</span>
                 <span>{userProfile.xp} / {xpNeeded}</span>
               </div>
-              <div className="h-2.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+              <div className="h-3 bg-zinc-100 dark:bg-zinc-800/80 rounded-full overflow-hidden relative border border-zinc-200/50 dark:border-zinc-700/30">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 rounded-full transition-all duration-700 ease-out relative"
                   style={{ width: `${xpPct}%` }}
-                />
+                >
+                  {/* Shimmer light element */}
+                  <span className="absolute inset-0 bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.25)_50%,transparent_100%)] animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
+                </div>
               </div>
             </div>
 
             {/* Gold coins */}
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
-                <Coins className="w-4 h-4" />
+            <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/40 dark:border-zinc-800/40 p-3 rounded-2xl">
+              <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-950/40 text-amber-500 dark:text-amber-400 shadow-md shadow-amber-500/10 flex-shrink-0 animate-pulse">
+                <Coins className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">Gold</p>
-                <p className="text-base font-black font-mono text-zinc-900 dark:text-zinc-100">{userProfile.coins}g</p>
+                <p className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Gold Balance</p>
+                <p className="text-lg font-black font-mono text-zinc-900 dark:text-amber-400">{userProfile.coins}g</p>
               </div>
             </div>
 
             {/* Streak */}
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-orange-100 dark:bg-orange-950/30 text-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.2)]">
-                <Flame className="w-4 h-4" />
+            <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/40 dark:border-zinc-800/40 p-3 rounded-2xl">
+              <div className="p-2.5 rounded-xl bg-orange-100 dark:bg-orange-950/40 text-orange-500 shadow-md shadow-orange-500/10 flex-shrink-0">
+                <Flame className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">Streak</p>
-                <p className="text-base font-black font-mono text-zinc-900 dark:text-zinc-100">{userProfile.streak}d</p>
+                <p className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Daily Streak</p>
+                <p className="text-lg font-black font-mono text-zinc-900 dark:text-orange-400">{userProfile.streak} days</p>
               </div>
             </div>
+
           </div>
         </div>
       </div>
 
       {/* ───── MAIN CONTENT ───── */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
 
         {/* ─── DASHBOARD TAB ─── */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-5">
+          <div className="space-y-6">
 
             {/* 1. Budget HP Card */}
-            <div className={`bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 transition-all ${hpGlowClass}`}>
+            <div className={`bg-white dark:bg-[#0c0c0f] rounded-3xl border p-6 transition-all duration-300 ${hpGlowClass}`}>
 
               {/* Title + period toggle + settings */}
-              <div className="flex flex-wrap items-start gap-3 justify-between mb-4">
+              <div className="flex flex-wrap items-start gap-4 justify-between mb-5">
                 <div>
-                  <h2 className="text-base font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                  <h2 className="text-base font-black text-zinc-900 dark:text-white flex items-center gap-2">
                     <Shield className="w-4 h-4 text-emerald-500" />
-                    Budget HP Tracker — <span className="text-zinc-500 dark:text-zinc-400 font-semibold text-sm">{hpStatusText}</span>
+                    Budget HP Tracker — <span className="text-zinc-500 dark:text-zinc-400 font-bold text-sm">{hpStatusText}</span>
                   </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Active Window: {pStart} → {pEnd}
+                  <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5">
+                    <Info size={11} />
+                    Active Window: {pStart} to {pEnd}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Period toggle */}
-                  <div className="flex bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-0.5 gap-0.5">
+                  <div className="flex bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/60 rounded-xl p-0.5 gap-0.5">
                     {(['weekly', 'monthly', 'yearly'] as BudgetPeriod[]).map((p) => (
                       <button
                         key={p}
                         onClick={() => handlePeriodChange(p)}
                         className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all
                           ${period === p
-                            ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                            ? 'bg-white dark:bg-zinc-800 text-violet-500 dark:text-violet-400 shadow-sm'
                             : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                       >
                         {PERIOD_LABELS[p]}
@@ -544,7 +489,7 @@ export const Dashboard: React.FC = () => {
                   </div>
                   <button
                     onClick={() => setShowBudgetSettings(!showBudgetSettings)}
-                    className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                    className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-800/60 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 transition-all"
                     title="Change Budget Limit"
                   >
                     <Settings className="w-4 h-4" />
@@ -554,9 +499,9 @@ export const Dashboard: React.FC = () => {
 
               {/* Budget limit settings panel */}
               {showBudgetSettings && (
-                <form onSubmit={handleSaveBudgetLimit} className="mb-4 flex flex-col sm:flex-row gap-3 items-end p-4 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800">
+                <form onSubmit={handleSaveBudgetLimit} className="mb-5 flex flex-col sm:flex-row gap-3 items-end p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800/50">
                   <div className="flex-1 space-y-1">
-                    <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">
                       Budget Limit per {PERIOD_LABELS[period]} ($)
                     </label>
                     <input
@@ -564,28 +509,28 @@ export const Dashboard: React.FC = () => {
                       placeholder={`e.g. ${period === 'weekly' ? '500' : period === 'monthly' ? '2000' : '24000'}`}
                       value={budgetLimitInput}
                       onChange={(e) => setBudgetLimitInput(e.target.value)}
-                      className="w-full bg-white dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-zinc-950 dark:text-zinc-100"
+                      className="w-full bg-white dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
                     />
                   </div>
-                  <button type="submit" className="px-4 py-2 text-sm font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
-                    Save
+                  <button type="submit" className="w-full sm:w-auto px-5 py-2.5 text-sm font-bold rounded-xl bg-violet-500 hover:bg-violet-600 text-white shadow-md shadow-violet-500/25 active:scale-95 transition-all">
+                    Save Limit
                   </button>
                 </form>
               )}
 
               {/* HP bar */}
-              <div className="space-y-3">
-                <div className="w-full h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl overflow-hidden relative flex items-center border border-zinc-300 dark:border-zinc-700 shadow-inner">
+              <div className="space-y-4">
+                <div className="w-full h-11 bg-zinc-100 dark:bg-zinc-800 rounded-2xl overflow-hidden relative flex items-center border border-zinc-200 dark:border-zinc-700/60 shadow-inner">
                   <div
-                    className={`h-full rounded-xl transition-all duration-700 ${hpBarColor}`}
+                    className={`h-full rounded-2xl transition-all duration-700 ${hpBarColor}`}
                     style={{ width: `${hpPct}%` }}
                   />
                   <div className="absolute inset-0 flex justify-between items-center px-4">
-                    <span className="text-xs font-black text-white drop-shadow">
+                    <span className="text-xs font-black text-white dark:text-white drop-shadow-md">
                       💖 ${remainingBudget.toFixed(0)} left of ${budgetLimit}
                     </span>
-                    <span className="text-xs font-black text-white drop-shadow font-mono">
-                      {Math.round(hpPct)}%
+                    <span className="text-xs font-black text-white dark:text-white drop-shadow-md font-mono">
+                      {Math.round(hpPct)}% HP
                     </span>
                   </div>
                 </div>
@@ -596,115 +541,97 @@ export const Dashboard: React.FC = () => {
                     { label: 'Amount Spent', value: `$${periodTransactionExpenses.toFixed(2)}`, color: 'text-rose-500' },
                     { label: 'Base Expenses', value: `$${recurringExpenseTotal.toFixed(2)}`, color: 'text-orange-500' },
                     { label: 'Logged Income', value: `$${periodTransactionIncome.toFixed(2)}`, color: 'text-emerald-500' },
-                    { label: 'Base Income', value: `$${recurringIncomeTotal.toFixed(2)}`, color: 'text-blue-500' },
+                    { label: 'Base Income', value: `$${recurringIncomeTotal.toFixed(2)}`, color: 'text-violet-500' },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-zinc-50 dark:bg-zinc-900/40 rounded-xl p-3 border border-zinc-100 dark:border-zinc-800/80 text-center">
-                      <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">{label}</p>
-                      <p className={`text-sm font-bold font-mono ${color}`}>{value}</p>
+                    <div key={label} className="bg-zinc-50 dark:bg-zinc-900/20 rounded-2xl p-3.5 border border-zinc-200/30 dark:border-zinc-800/40 text-center hover:scale-[1.02] transition-transform">
+                      <p className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-1">{label}</p>
+                      <p className={`text-base font-black font-mono ${color}`}>{value}</p>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* 2. DEDICATED ALLOWANCE SECTIONS (Weekly Travel & Weekly Food) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* Travel Allowance Widget */}
-              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-sky-200 dark:border-sky-900/40 shadow-sm p-4 relative overflow-hidden">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.3)]">
-                      <Car className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Weekly Travel Allowance</h4>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Gas, Transit, Travel &amp; Fuel</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={openAllowanceModal}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/20 transition-all"
-                    title="Edit Allowance"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Progress bar */}
-                <div className="space-y-1.5 mt-3">
-                  <div className="flex justify-between text-xs font-mono font-bold">
-                    <span className="text-sky-600 dark:text-sky-400">Spent: ${weeklyTravelSpent.toFixed(2)}</span>
-                    <span className="text-zinc-500">Cap: ${weeklyTravelAllowance.toFixed(2)}/wk</span>
-                  </div>
-                  <div className="h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        travelPct >= 100 ? 'bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
-                        travelPct >= 80 ? 'bg-amber-500' :
-                        'bg-gradient-to-r from-sky-400 to-blue-500 shadow-[0_0_8px_rgba(56,189,248,0.4)]'
-                      }`}
-                      style={{ width: `${travelPct}%` }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
-                    <span>{travelRemaining > 0 ? `🛡️ $${travelRemaining.toFixed(2)} remaining this week` : '⚠️ Allowance exceeded!'}</span>
-                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{Math.round(travelPct)}% used</span>
-                  </p>
-                </div>
+            {/* 2. DYNAMIC ALLOWANCE SECTIONS */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Star className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
+                  Active Allowances
+                </h3>
               </div>
 
-              {/* Food Allowance Widget */}
-              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-amber-200 dark:border-amber-900/40 shadow-sm p-4 relative overflow-hidden">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.3)]">
-                      <Utensils className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Weekly Food Allowance</h4>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Groceries, Dining &amp; Rations</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={openAllowanceModal}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-all"
-                    title="Edit Allowance"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(userProfile.allowances || []).map((allowance) => {
+                  const spent = getAllowanceSpent(allowance, transactions, weekStart, weekEnd);
+                  const limit = allowance.weeklyBudget;
+                  const remaining = Math.max(0, limit - spent);
+                  const pct = limit > 0 ? Math.min(100, (spent / limit) * 100) : 0;
+                  const colors = ALLOWANCE_COLOR_CLASSES[allowance.color] || ALLOWANCE_COLOR_CLASSES.violet;
 
-                {/* Progress bar */}
-                <div className="space-y-1.5 mt-3">
-                  <div className="flex justify-between text-xs font-mono font-bold">
-                    <span className="text-amber-600 dark:text-amber-400">Spent: ${weeklyFoodSpent.toFixed(2)}</span>
-                    <span className="text-zinc-500">Cap: ${weeklyFoodAllowance.toFixed(2)}/wk</span>
-                  </div>
-                  <div className="h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                  return (
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        foodPct >= 100 ? 'bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
-                        foodPct >= 80 ? 'bg-amber-500' :
-                        'bg-gradient-to-r from-amber-400 to-orange-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
-                      }`}
-                      style={{ width: `${foodPct}%` }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
-                    <span>{foodRemaining > 0 ? `🥖 $${foodRemaining.toFixed(2)} remaining this week` : '⚠️ Allowance exceeded!'}</span>
-                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{Math.round(foodPct)}% used</span>
-                  </p>
-                </div>
+                      key={allowance.id}
+                      className={`bg-white dark:bg-[#0c0c0f] rounded-3xl border ${colors.border} shadow-md shadow-zinc-200/20 dark:shadow-none p-5 relative overflow-hidden hover:scale-[1.01] transition-transform duration-200`}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className={`text-2xl w-10 h-10 flex items-center justify-center rounded-2xl ${colors.bg}`}>
+                            {allowance.icon}
+                          </span>
+                          <div>
+                            <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">{allowance.name}</h4>
+                            <p className="text-[10px] text-zinc-400 mt-0.5 truncate max-w-[200px]">
+                              Matches: {allowance.matchKeywords.join(', ')}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="space-y-2 mt-4">
+                        <div className="flex justify-between text-xs font-mono font-bold">
+                          <span className={colors.text}>Spent: ${spent.toFixed(2)}</span>
+                          <span className="text-zinc-400">Limit: ${limit.toFixed(2)}/wk</span>
+                        </div>
+                        <div className="h-3.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200/50 dark:border-zinc-700/50">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r ${
+                              pct >= 100 ? 'from-red-500 to-rose-600 shadow-[0_0_10px_rgba(239,68,68,0.4)]' :
+                              pct >= 85 ? 'from-amber-400 to-orange-500' :
+                              colors.bar
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <p className="text-[11px] text-zinc-400 flex items-center justify-between mt-1">
+                          <span>
+                            {remaining > 0
+                              ? `🛡️ $${remaining.toFixed(2)} remaining`
+                              : '⚠️ Limit exceeded!'}
+                          </span>
+                          <span className="font-bold font-mono text-zinc-600 dark:text-zinc-300">{Math.round(pct)}% used</span>
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* 3. DETAILED SPENT BREAKDOWN ACCORDION */}
+            {/* 3. Allowance Configuration Panel */}
+            <AllowanceManager
+              uid={currentUser.uid}
+              allowances={userProfile.allowances || []}
+              onChanged={refreshProfile}
+            />
+
+            {/* 4. SPENT BREAKDOWN BREAKOUT */}
             {categoryBreakdown.length > 0 && (
-              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
+              <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                    <PieChart className="w-4 h-4 text-purple-500" />
+                  <h3 className="text-sm font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-violet-500" />
                     Spent Breakdown ({PERIOD_LABELS[period]})
                   </h3>
                   <span className="text-xs font-mono font-bold text-rose-500">
@@ -715,14 +642,14 @@ export const Dashboard: React.FC = () => {
                   {categoryBreakdown.map((item) => (
                     <div key={item.category} className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <span className="font-semibold text-zinc-700 dark:text-zinc-300">{item.category}</span>
-                        <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                        <span className="font-semibold text-zinc-600 dark:text-zinc-300">{item.category}</span>
+                        <span className="font-mono font-bold text-zinc-900 dark:text-white">
                           ${item.amount.toFixed(2)} <span className="text-zinc-400 font-normal">({Math.round(item.pct)}%)</span>
                         </span>
                       </div>
                       <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
+                          className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all duration-500"
                           style={{ width: `${item.pct}%` }}
                         />
                       </div>
@@ -732,8 +659,8 @@ export const Dashboard: React.FC = () => {
               </div>
             )}
 
-            {/* 4. Recurring Base Sections */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 5. Recurring Base Sections */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <RecurringSection
                 type="income"
                 items={userProfile.recurringIncome || []}
@@ -750,15 +677,15 @@ export const Dashboard: React.FC = () => {
               />
             </div>
 
-            {/* 5. Add transaction form */}
-            <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
-              <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
-                <Sword className="w-4 h-4 text-blue-500" />
+            {/* 6. Add transaction form */}
+            <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
+              <h3 className="text-base font-black text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
+                <Sword className="w-4 h-4 text-violet-500" />
                 Log a Transaction
               </h3>
 
               {/* Income / Expense toggle */}
-              <div className="grid grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4 border border-zinc-200 dark:border-zinc-800">
+              <div className="grid grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4 border border-zinc-200/80 dark:border-zinc-800/60">
                 {(['expense', 'income'] as const).map((t) => (
                   <button
                     key={t}
@@ -775,29 +702,29 @@ export const Dashboard: React.FC = () => {
                 ))}
               </div>
 
-              <form onSubmit={handleAddTransaction} className="space-y-3">
+              <form onSubmit={handleAddTransaction} className="space-y-4">
                 {formError && (
-                  <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-xs rounded-xl">
+                  <div className="p-3.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 text-rose-700 dark:text-rose-400 text-xs rounded-xl">
                     {formError}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Amount ($)</label>
+                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Amount ($)</label>
                     <div className="relative">
-                      <DollarSign className="absolute left-3 top-2.5 w-3.5 h-3.5 text-zinc-400" />
+                      <DollarSign className="absolute left-3 top-3 w-3.5 h-3.5 text-zinc-400" />
                       <input
                         type="number" step="0.01" required placeholder="0.00"
                         value={amount} onChange={(e) => setAmount(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
+                        className="w-full pl-9 pr-3 py-2.5 bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
                       />
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Category</label>
+                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Category</label>
                     <select
                       required value={category} onChange={(e) => setCategory(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-zinc-950 dark:text-zinc-100"
+                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
                     >
                       <option value="">-- Category --</option>
                       {(txType === 'income' ? incomeCategories : expenseCategories).map((c) => (
@@ -806,24 +733,24 @@ export const Dashboard: React.FC = () => {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Description (optional)</label>
+                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Description (optional)</label>
                     <input
                       type="text" placeholder="What was it for?"
                       value={description} onChange={(e) => setDescription(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
+                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100 placeholder-zinc-400"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Date</label>
+                    <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">Date</label>
                     <input
                       type="date" required value={date} onChange={(e) => setDate(e.target.value)}
-                      className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-zinc-950 dark:text-zinc-100"
+                      className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/40 text-zinc-950 dark:text-zinc-100"
                     />
                   </div>
                 </div>
                 <button
                   type="submit" disabled={formLoading}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-500/60 text-white shadow transition-all active:scale-[0.99]"
+                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-violet-500 hover:bg-violet-600 disabled:bg-violet-500/60 text-white shadow-lg shadow-violet-500/25 transition-all active:scale-[0.99] border-b-2 border-violet-700"
                 >
                   {formLoading
                     ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -836,21 +763,21 @@ export const Dashboard: React.FC = () => {
 
         {/* ─── HISTORY TAB ─── */}
         {activeTab === 'history' && (
-          <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+          <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none overflow-hidden">
             {/* Toolbar */}
             <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100">Transaction History</h3>
-                <p className="text-xs text-zinc-500">{transactions.length} total transactions</p>
+                <h3 className="text-base font-black text-zinc-900 dark:text-white">Transaction History</h3>
+                <p className="text-xs text-zinc-400">{transactions.length} total transactions recorded</p>
               </div>
-              <div className="flex bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-0.5 gap-0.5">
+              <div className="flex bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/60 rounded-xl p-0.5 gap-0.5">
                 {(['all', 'income', 'expense'] as const).map((f) => (
                   <button
                     key={f}
                     onClick={() => { setTxFilter(f); setCurrentPage(1); }}
                     className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all capitalize
                       ${txFilter === f
-                        ? `bg-white dark:bg-zinc-800 shadow-sm ${f === 'income' ? 'text-emerald-600 dark:text-emerald-400' : f === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-zinc-900 dark:text-zinc-100'}`
+                        ? `bg-white dark:bg-zinc-800 shadow-sm ${f === 'income' ? 'text-emerald-600 dark:text-emerald-400' : f === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-zinc-900 dark:text-white'}`
                         : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
                   >
                     {f === 'all' ? 'All' : f === 'income' ? 'Loot' : 'Expenses'}
@@ -862,13 +789,13 @@ export const Dashboard: React.FC = () => {
             {/* Table */}
             <div className="overflow-x-auto">
               {loadingTxs ? (
-                <div className="p-12 text-center text-zinc-500 text-sm">Loading…</div>
+                <div className="p-12 text-center text-zinc-500 text-sm">Querying logs…</div>
               ) : paginated.length === 0 ? (
-                <div className="p-12 text-center text-zinc-400 text-sm">No transactions yet.</div>
+                <div className="p-12 text-center text-zinc-400 text-sm">No transaction records found.</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 text-[10px] uppercase tracking-wider font-bold border-b border-zinc-200 dark:border-zinc-800">
+                    <tr className="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-400 text-[10px] uppercase tracking-wider font-extrabold border-b border-zinc-200 dark:border-zinc-800">
                       <th className="px-5 py-3 text-left">Date</th>
                       <th className="px-5 py-3 text-left">Category</th>
                       <th className="px-5 py-3 text-left hidden sm:table-cell">Description</th>
@@ -878,29 +805,29 @@ export const Dashboard: React.FC = () => {
                   </thead>
                   <tbody>
                     {paginated.map((tx) => (
-                      <tr key={tx.id} className="border-b border-zinc-100 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors">
-                        <td className="px-5 py-3 font-mono text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{tx.date}</td>
-                        <td className="px-5 py-3">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
+                      <tr key={tx.id} className="border-b border-zinc-100 dark:border-zinc-800/40 hover:bg-zinc-50 dark:hover:bg-zinc-900/30 transition-colors">
+                        <td className="px-5 py-3.5 font-mono text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{tx.date}</td>
+                        <td className="px-5 py-3.5">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold
                             ${tx.type === 'income'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
-                              : 'bg-rose-100 text-rose-800 dark:bg-rose-950/30 dark:text-rose-400'}`}>
+                              ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400 border border-emerald-500/10'
+                              : 'bg-rose-50 text-rose-800 dark:bg-rose-950/20 dark:text-rose-400 border border-rose-500/10'}`}>
                             {tx.type === 'income' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                             {tx.category}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-zinc-700 dark:text-zinc-300 hidden sm:table-cell max-w-[200px] truncate">
-                          {tx.description || <span className="italic text-zinc-400">—</span>}
+                        <td className="px-5 py-3.5 text-zinc-700 dark:text-zinc-300 hidden sm:table-cell max-w-[200px] truncate">
+                          {tx.description || <span className="italic text-zinc-500">—</span>}
                         </td>
-                        <td className="px-5 py-3 text-right font-bold font-mono whitespace-nowrap">
+                        <td className="px-5 py-3.5 text-right font-bold font-mono whitespace-nowrap">
                           <span className={tx.type === 'income' ? 'text-emerald-500' : 'text-rose-500'}>
                             {tx.type === 'income' ? '+' : '-'}${tx.amount.toFixed(2)}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-center">
+                        <td className="px-5 py-3.5 text-center">
                           <button
                             onClick={() => handleDeleteTx(tx.id)}
-                            className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all"
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/25 transition-all"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -936,25 +863,25 @@ export const Dashboard: React.FC = () => {
 
         {/* ─── ACHIEVEMENTS TAB ─── */}
         {activeTab === 'achievements' && (
-          <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
-            <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 mb-1 flex items-center gap-2">
+          <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
+            <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
               <Trophy className="w-4 h-4 text-yellow-500" /> Quests &amp; Achievements
             </h3>
-            <p className="text-xs text-zinc-500 mb-4">{userProfile.unlockedAchievements.length} / {ACHIEVEMENTS.length} unlocked</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <p className="text-xs text-zinc-400 mb-4">{userProfile.unlockedAchievements?.length || 0} of {ACHIEVEMENTS.length} completed</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {ACHIEVEMENTS.map((ach) => {
-                const unlocked = userProfile.unlockedAchievements.includes(ach.id);
+                const unlocked = (userProfile.unlockedAchievements || []).includes(ach.id);
                 return (
                   <div
                     key={ach.id}
-                    className={`flex items-start gap-3 p-4 rounded-xl border transition-all
+                    className={`flex items-start gap-3 p-4 rounded-2xl border transition-all duration-200
                       ${unlocked
-                        ? 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800'
-                        : 'bg-zinc-50 dark:bg-zinc-900/20 border-zinc-100 dark:border-zinc-900/40 opacity-55 grayscale'}`}
+                        ? 'bg-white dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800 hover:scale-[1.01]'
+                        : 'bg-zinc-50 dark:bg-zinc-900/10 border-zinc-200/40 dark:border-zinc-900/30 opacity-50 grayscale'}`}
                   >
                     <div className={`p-2.5 rounded-xl border flex-shrink-0
                       ${unlocked
-                        ? ach.rarity === 'legendary' ? 'bg-purple-100 dark:bg-purple-950/30 border-purple-400/50 text-purple-600 dark:text-purple-400'
+                        ? ach.rarity === 'legendary' ? 'bg-purple-100 dark:bg-purple-950/30 border-purple-400/50 text-purple-600 dark:text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.25)]'
                           : ach.rarity === 'epic' ? 'bg-yellow-100 dark:bg-yellow-950/30 border-yellow-400/50 text-yellow-600 dark:text-yellow-400'
                           : ach.rarity === 'rare' ? 'bg-blue-100 dark:bg-blue-950/30 border-blue-400/50 text-blue-600 dark:text-blue-400'
                           : 'bg-emerald-100 dark:bg-emerald-950/30 border-emerald-400/30 text-emerald-600 dark:text-emerald-400'
@@ -963,19 +890,19 @@ export const Dashboard: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{ach.title}</h4>
-                        <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded
-                          ${ach.rarity === 'legendary' ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400'
-                            : ach.rarity === 'epic' ? 'bg-yellow-100 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-400'
-                            : ach.rarity === 'rare' ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
+                        <h4 className="text-sm font-extrabold text-zinc-900 dark:text-white">{ach.title}</h4>
+                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full
+                          ${ach.rarity === 'legendary' ? 'bg-purple-100 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300'
+                            : ach.rarity === 'epic' ? 'bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300'
+                            : ach.rarity === 'rare' ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
                             : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
                           {ach.rarity}
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{ach.description}</p>
-                      <div className="flex gap-3 mt-1.5 text-[10px] font-mono font-bold">
-                        <span className="text-blue-500 flex items-center gap-0.5"><Sparkles className="w-3 h-3" />+{ach.xpReward} XP</span>
-                        <span className="text-yellow-500 flex items-center gap-0.5"><Coins className="w-3 h-3" />+{ach.coinsReward}g</span>
+                      <div className="flex gap-3 mt-2 text-[10px] font-mono font-bold">
+                        <span className="text-violet-500 flex items-center gap-0.5"><Sparkles className="w-3 h-3" />+{ach.xpReward} XP</span>
+                        <span className="text-amber-500 flex items-center gap-0.5"><Coins className="w-3 h-3" />+{ach.coinsReward}g</span>
                       </div>
                     </div>
                     {unlocked && <Check className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-1" />}
@@ -988,35 +915,35 @@ export const Dashboard: React.FC = () => {
 
         {/* ─── SHOP TAB ─── */}
         {activeTab === 'shop' && (
-          <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
-            <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 mb-1 flex items-center gap-2">
+          <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-md shadow-zinc-200/20 dark:shadow-none p-5">
+            <h3 className="text-base font-black text-zinc-900 dark:text-white mb-1 flex items-center gap-2">
               <ShoppingBag className="w-4 h-4 text-purple-500" /> Guild Armory
             </h3>
-            <p className="text-xs text-zinc-500 mb-4">Spend gold coins to unlock cosmetics — <span className="font-bold text-yellow-500">{userProfile.coins}g available</span></p>
+            <p className="text-xs text-zinc-400 mb-4">Spend gold coins to unlock customizations — <span className="font-extrabold text-amber-500">{userProfile.coins}g available</span></p>
 
             {/* Frames */}
-            <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Avatar Frames</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+            <h4 className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider mb-2">Avatar Frames</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-6">
               {SHOP_ITEMS.filter((i) => i.type === 'frame').map((item) => {
                 const equipped = userProfile.activeAvatarFrame === item.id;
                 const owned = item.price === 0 || equipped;
                 return (
-                  <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 gap-3">
+                  <div key={item.id} className="flex items-center justify-between p-3.5 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-full border-4 bg-zinc-200 dark:bg-zinc-700 flex-shrink-0 ${item.previewColor}`} />
+                      <div className={`w-9 h-9 rounded-full border-4 bg-zinc-200 dark:bg-zinc-700 flex-shrink-0 ${item.previewColor}`} />
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">{item.name}</p>
+                        <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">{item.name}</p>
                         {item.price > 0 && !equipped && <p className="text-[10px] text-zinc-500 font-mono">{item.price}g</p>}
                       </div>
                     </div>
                     {equipped ? (
-                      <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-900/30 flex-shrink-0">
+                      <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 rounded-lg border border-violet-100 dark:border-violet-900/30 flex-shrink-0">
                         <Check className="w-3 h-3" /> On
                       </span>
                     ) : owned ? (
-                      <button onClick={() => handlePurchase(item.id, 0, 'frame')} className="px-3 py-1 text-xs font-bold rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-all flex-shrink-0">Equip</button>
+                      <button onClick={() => handlePurchase(item.id, 0, 'frame')} className="px-3.5 py-1 text-xs font-bold rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-all flex-shrink-0 active:scale-95">Equip</button>
                     ) : (
-                      <button onClick={() => handlePurchase(item.id, item.price, 'frame')} className="flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-zinc-950 transition-all flex-shrink-0 font-mono">
+                      <button onClick={() => handlePurchase(item.id, item.price, 'frame')} className="flex items-center gap-1 px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-zinc-950 transition-all flex-shrink-0 font-mono active:scale-95">
                         <Coins className="w-3 h-3" />{item.price}g
                       </button>
                     )}
@@ -1026,28 +953,28 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {/* Themes */}
-            <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">Themes</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <h4 className="text-xs font-extrabold text-zinc-400 uppercase tracking-wider mb-2">Themes</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {SHOP_ITEMS.filter((i) => i.type === 'theme').map((item) => {
                 const equipped = userProfile.activeTheme === item.id;
-                const owned = userProfile.unlockedThemes.includes(item.id) || item.price === 0;
+                const owned = (userProfile.unlockedThemes || []).includes(item.id) || item.price === 0;
                 return (
-                  <div key={item.id} className="flex items-center justify-between p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 gap-3">
+                  <div key={item.id} className="flex items-center justify-between p-3.5 rounded-2xl border border-zinc-150 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex-shrink-0 ${item.previewColor}`} />
+                      <div className={`w-9 h-9 rounded-xl flex-shrink-0 ${item.previewColor}`} />
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">{item.name}</p>
+                        <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">{item.name}</p>
                         {!owned && <p className="text-[10px] text-zinc-500 font-mono">{item.price}g</p>}
                       </div>
                     </div>
                     {equipped ? (
-                      <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-900/30 flex-shrink-0">
+                      <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 rounded-lg border border-violet-100 dark:border-violet-900/30 flex-shrink-0">
                         <Check className="w-3 h-3" /> Active
                       </span>
                     ) : owned ? (
-                      <button onClick={() => handlePurchase(item.id, 0, 'theme')} className="px-3 py-1 text-xs font-bold rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-all flex-shrink-0">Use</button>
+                      <button onClick={() => handlePurchase(item.id, 0, 'theme')} className="px-3.5 py-1 text-xs font-bold rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-all flex-shrink-0 active:scale-95">Use</button>
                     ) : (
-                      <button onClick={() => handlePurchase(item.id, item.price, 'theme')} className="flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-zinc-950 transition-all flex-shrink-0 font-mono">
+                      <button onClick={() => handlePurchase(item.id, item.price, 'theme')} className="flex items-center gap-1 px-3.5 py-1 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-zinc-950 transition-all flex-shrink-0 font-mono active:scale-95">
                         <Coins className="w-3 h-3" />{item.price}g
                       </button>
                     )}
@@ -1060,7 +987,7 @@ export const Dashboard: React.FC = () => {
       </main>
 
       {/* ───── MOBILE BOTTOM NAV ───── */}
-      <nav className="fixed bottom-0 inset-x-0 md:hidden z-30 bg-white/95 dark:bg-[#0c0c0f]/95 backdrop-blur border-t border-zinc-200 dark:border-zinc-800 flex justify-around pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] px-2 shadow-lg">
+      <nav className="fixed bottom-0 inset-x-0 md:hidden z-30 bg-white/95 dark:bg-[#0c0c0f]/95 backdrop-blur-md border-t border-zinc-200/80 dark:border-zinc-800/80 flex justify-around pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] px-2 shadow-lg">
         {([
           { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Home' },
           { tab: 'history', icon: <History className="w-5 h-5" />, label: 'History' },
@@ -1070,9 +997,9 @@ export const Dashboard: React.FC = () => {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-[10px] font-bold transition-colors
+            className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-[10px] font-bold transition-all duration-200
               ${activeTab === tab
-                ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                ? 'text-violet-500 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30'
                 : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
           >
             {icon}
@@ -1081,95 +1008,26 @@ export const Dashboard: React.FC = () => {
         ))}
       </nav>
 
-      {/* ───── ALLOWANCES EDIT MODAL ───── */}
-      {showAllowanceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/70 backdrop-blur-sm">
-          <div className="w-full max-w-sm bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-2xl relative">
-            <button onClick={() => setShowAllowanceModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600">
-              <X className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400">
-                <Settings className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-black text-zinc-950 dark:text-zinc-50">Configure Allowances</h3>
-                <p className="text-xs text-zinc-500">Weekly spending caps</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveAllowances} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Car className="w-3.5 h-3.5 text-sky-500" /> Weekly Travel Allowance ($)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  placeholder="100.00"
-                  value={travelInput}
-                  onChange={(e) => setTravelInput(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-zinc-950 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Utensils className="w-3.5 h-3.5 text-amber-500" /> Weekly Food Allowance ($)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  placeholder="200.00"
-                  value={foodInput}
-                  onChange={(e) => setFoodInput(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-zinc-950 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={savingAllowances}
-                  className="flex-1 py-3 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow disabled:opacity-50"
-                >
-                  {savingAllowances ? 'Saving...' : 'Save Allowances'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAllowanceModal(false)}
-                  className="px-4 py-3 text-xs font-bold rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* ───── LEVEL UP MODAL ───── */}
       {showLevelUpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/70 backdrop-blur-sm">
-          <div className="w-full max-w-sm bg-white dark:bg-[#0c0c0f] border-2 border-yellow-500 rounded-3xl p-6 text-center shadow-[0_0_30px_#eab308]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/85 backdrop-blur-md">
+          <div className="w-full max-w-sm bg-white dark:bg-[#0c0c0f] border-2 border-yellow-500 rounded-3xl p-6 text-center shadow-[0_0_40px_#eab308] relative">
             <button onClick={() => setShowLevelUpModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600">
               <X className="w-5 h-5" />
             </button>
-            <div className="inline-flex p-4 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 mb-4 animate-bounce">
+            <div className="inline-flex p-4.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 mb-4 animate-bounce">
               <Award className="w-12 h-12" />
             </div>
-            <h2 className="text-3xl font-black text-zinc-950 dark:text-zinc-50">LEVEL UP!</h2>
+            <h2 className="text-3xl font-black text-zinc-950 dark:text-white">LEVEL UP!</h2>
             <p className="text-zinc-500 mt-1">You reached</p>
-            <p className="text-5xl font-black text-yellow-500 my-4">{leveledUpTo}</p>
+            <p className="text-6xl font-black text-yellow-500 my-4">{leveledUpTo}</p>
             <div className="flex justify-center gap-4 text-sm font-bold font-mono mb-6">
               <span className="text-yellow-500 flex items-center gap-1"><Coins className="w-4 h-4" />+{leveledUpTo * 50}g</span>
-              <span className="text-blue-500 flex items-center gap-1"><Star className="w-4 h-4" />New Rank!</span>
+              <span className="text-violet-500 flex items-center gap-1"><Star className="w-4 h-4" />New Rank!</span>
             </div>
             <button
               onClick={() => setShowLevelUpModal(false)}
-              className="w-full py-3 rounded-xl font-bold bg-yellow-500 hover:bg-yellow-600 text-zinc-950 transition-all border-b-4 border-yellow-700 active:border-b-0 active:translate-y-1"
+              className="w-full py-3.5 rounded-xl font-bold bg-yellow-500 hover:bg-yellow-600 text-zinc-950 transition-all border-b-4 border-yellow-700 active:border-b-0 active:translate-y-1"
             >
               Continue Quest
             </button>
@@ -1185,12 +1043,12 @@ export const Dashboard: React.FC = () => {
               <Trophy className="w-5 h-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-yellow-600 dark:text-yellow-400">Achievement Unlocked!</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-yellow-600 dark:text-yellow-400">Quest Completed!</p>
               {unlockedNotifications.map((id) => {
                 const ach = ACHIEVEMENTS.find((a) => a.id === id);
                 return (
                   <div key={id} className="mt-1">
-                    <p className="text-sm font-black text-zinc-950 dark:text-zinc-100">{ach?.title}</p>
+                    <p className="text-sm font-black text-zinc-950 dark:text-white">{ach?.title}</p>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">{ach?.description}</p>
                     <p className="text-[10px] font-bold text-yellow-500 font-mono">+{ach?.xpReward} XP &nbsp; +{ach?.coinsReward}g</p>
                   </div>
