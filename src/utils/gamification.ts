@@ -47,6 +47,9 @@ export interface UserProfile {
   weeklyTravelAllowance?: number;
   /** @deprecated use allowances array */
   weeklyFoodAllowance?: number;
+  targetSavings?: number;
+  customIncomeOverride?: number;
+  customExpenseOverride?: number;
   createdAt: string;
 }
 

@@ -6,6 +6,8 @@ import {
   Transaction,
   RecurringItem,
   BudgetPeriod,
+  Allowance,
+  RecurringCycle,
   ACHIEVEMENTS,
   SHOP_ITEMS,
   PERIOD_LABELS,
@@ -96,6 +98,19 @@ export const Dashboard: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
 
+  // Quest Planner Form State
+  const [savingsInput, setSavingsInput] = useState('');
+  const [incomeInput, setIncomeInput] = useState('');
+  const [expenseInput, setExpenseInput] = useState('');
+  const [plannerSaving, setPlannerSaving] = useState(false);
+  const [plannerError, setPlannerError] = useState('');
+  const [lastSyncedProfile, setLastSyncedProfile] = useState<{
+    period?: BudgetPeriod;
+    savings?: number;
+    income?: number;
+    expense?: number;
+  }>({});
+
   // Allowance form state
   const [editAllowanceId, setEditAllowanceId] = useState<string | null>(null);
   const [allowanceFormError, setAllowanceFormError] = useState('');
@@ -137,6 +152,33 @@ export const Dashboard: React.FC = () => {
     });
   }, [currentUser]);
 
+  // Sync local planner inputs from userProfile when database values change or active period changes
+  useEffect(() => {
+    if (userProfile) {
+      const currentPeriod = userProfile.budgetPeriod || 'monthly';
+      const currentSavings = userProfile.targetSavings || 0;
+      const currentIncome = userProfile.customIncomeOverride || 0;
+      const currentExpense = userProfile.customExpenseOverride || 0;
+
+      if (
+        currentPeriod !== lastSyncedProfile.period ||
+        currentSavings !== lastSyncedProfile.savings ||
+        currentIncome !== lastSyncedProfile.income ||
+        currentExpense !== lastSyncedProfile.expense
+      ) {
+        setSavingsInput(currentSavings.toString());
+        setIncomeInput(currentIncome > 0 ? currentIncome.toString() : '');
+        setExpenseInput(currentExpense > 0 ? currentExpense.toString() : '');
+        setLastSyncedProfile({
+          period: currentPeriod,
+          savings: currentSavings,
+          income: currentIncome,
+          expense: currentExpense,
+        });
+      }
+    }
+  }, [userProfile, lastSyncedProfile]);
+
   if (!userProfile || !currentUser) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-white">
@@ -169,6 +211,33 @@ export const Dashboard: React.FC = () => {
   const recurringIncomeTotal = (userProfile.recurringIncome || []).reduce(
     (s, r) => s + normalizeToPeriod(r.amount, r.cycle, period), 0
   );
+
+  // ------------------------------------------------------------------
+  // Quest Planner Calculations
+  // ------------------------------------------------------------------
+  const getAllowanceTotalForPeriod = (allowances: Allowance[], targetPeriod: BudgetPeriod): number => {
+    const sumWeekly = (allowances || []).reduce((s, a) => s + a.weeklyBudget, 0);
+    if (targetPeriod === 'weekly') return sumWeekly;
+    if (targetPeriod === 'monthly') return (sumWeekly * 52) / 12;
+    return sumWeekly * 52;
+  };
+
+  const plannerAllowanceTotal = getAllowanceTotalForPeriod(userProfile.allowances || [], period);
+  const targetSavingsVal = userProfile.targetSavings || 0;
+
+  // Use overrides if set in profile and greater than 0, otherwise default to recurring totals
+  const plannedIncomeVal = userProfile.customIncomeOverride && userProfile.customIncomeOverride > 0
+    ? userProfile.customIncomeOverride
+    : recurringIncomeTotal;
+
+  const plannedExpenseVal = userProfile.customExpenseOverride && userProfile.customExpenseOverride > 0
+    ? userProfile.customExpenseOverride
+    : recurringExpenseTotal;
+
+  const totalPlannerNeeded = plannedExpenseVal + plannerAllowanceTotal + targetSavingsVal;
+  const plannerDeficit = Math.max(0, totalPlannerNeeded - plannedIncomeVal);
+  const plannerAvailableSpending = Math.max(0, plannedIncomeVal - plannedExpenseVal - targetSavingsVal);
+  const plannerPotentialSavings = Math.max(0, plannedIncomeVal - plannedExpenseVal - plannerAllowanceTotal);
 
   const totalSpend = periodTransactionExpenses + recurringExpenseTotal;
   const budgetLimit = userProfile.budgetLimit || 1000;
@@ -212,7 +281,22 @@ export const Dashboard: React.FC = () => {
   // Period toggle
   // ------------------------------------------------------------------
   const handlePeriodChange = async (p: BudgetPeriod) => {
-    await updateProfile({ budgetPeriod: p });
+    const oldPeriod = userProfile.budgetPeriod || 'monthly';
+    if (oldPeriod === p) return;
+
+    const updates: Partial<UserProfile> = { budgetPeriod: p };
+
+    if (userProfile.targetSavings) {
+      updates.targetSavings = Math.round(normalizeToPeriod(userProfile.targetSavings, oldPeriod as RecurringCycle, p));
+    }
+    if (userProfile.customIncomeOverride) {
+      updates.customIncomeOverride = Math.round(normalizeToPeriod(userProfile.customIncomeOverride, oldPeriod as RecurringCycle, p));
+    }
+    if (userProfile.customExpenseOverride) {
+      updates.customExpenseOverride = Math.round(normalizeToPeriod(userProfile.customExpenseOverride, oldPeriod as RecurringCycle, p));
+    }
+
+    await updateProfile(updates);
   };
 
   // ------------------------------------------------------------------
@@ -225,6 +309,56 @@ export const Dashboard: React.FC = () => {
     await updateProfile({ budgetLimit: v });
     setShowBudgetSettings(false);
     setBudgetLimitInput('');
+  };
+
+  // ------------------------------------------------------------------
+  // Quest Planner Save
+  // ------------------------------------------------------------------
+  const handleSavePlanner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPlannerSaving(true);
+    setPlannerError('');
+
+    try {
+      const savings = parseFloat(savingsInput);
+      const income = incomeInput ? parseFloat(incomeInput) : 0;
+      const expense = expenseInput ? parseFloat(expenseInput) : 0;
+
+      if (isNaN(savings) || savings < 0) {
+        throw new Error('Savings goal must be a valid number >= 0.');
+      }
+      if (incomeInput && (isNaN(income) || income < 0)) {
+        throw new Error('Simulated income must be a valid number >= 0.');
+      }
+      if (expenseInput && (isNaN(expense) || expense < 0)) {
+        throw new Error('Simulated expense must be a valid number >= 0.');
+      }
+
+      await updateProfile({
+        targetSavings: savings,
+        customIncomeOverride: income,
+        customExpenseOverride: expense,
+      });
+
+      // Show success celebration if it's a victory plan!
+      const currentAllowanceSum = getAllowanceTotalForPeriod(userProfile.allowances || [], period);
+      const currentIncomeTotal = income > 0 ? income : recurringIncomeTotal;
+      const currentExpenseTotal = expense > 0 ? expense : recurringExpenseTotal;
+      const totalNeeded = currentExpenseTotal + currentAllowanceSum + savings;
+
+      if (currentIncomeTotal >= totalNeeded) {
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.7 },
+          colors: ['#facc15', '#a78bfa', '#34d399', '#60a5fa'],
+        });
+      }
+    } catch (err: any) {
+      setPlannerError(err.message || 'Failed to save planning parameters.');
+    } finally {
+      setPlannerSaving(false);
+    }
   };
 
   // ------------------------------------------------------------------
@@ -680,6 +814,261 @@ export const Dashboard: React.FC = () => {
                       <p className={`text-base font-black font-mono ${color}`}>{value}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Quest Board: Fortress Economy Planner */}
+            <div className="bg-white dark:bg-[#0c0c0f] rounded-3xl border border-amber-200/60 dark:border-amber-950/40 p-6 relative overflow-hidden shadow-lg shadow-amber-500/5 dark:shadow-none">
+              {/* Parchment background accent */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+              
+              {/* Header */}
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-5 pb-4 border-b border-zinc-100 dark:border-zinc-800/80">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">📜</span>
+                  <div>
+                    <h2 className="text-base font-black text-zinc-900 dark:text-white flex items-center gap-1.5">
+                      Scroll of Financial Destiny
+                      <span className="text-xs px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider">
+                        Quest Planner
+                      </span>
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      Calculate your income versus expenses and allowances per {PERIOD_LABELS[period]}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid content */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* Left Side: Parameters / Inputs */}
+                <form onSubmit={handleSavePlanner} className="space-y-4">
+                  <h3 className="text-xs font-extrabold text-amber-500 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                    <Sword className="w-3.5 h-3.5 animate-bounce" />
+                    Configure Quest Requirements
+                  </h3>
+
+                  <div className="space-y-3">
+                    {/* Vault Deposit (Target Savings) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest flex justify-between">
+                        <span>Vault Deposit Target (Savings Goal)</span>
+                        <span className="text-amber-500 font-mono font-bold">${targetSavingsVal.toFixed(0)} saved</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs font-mono font-bold">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Set target savings"
+                            value={savingsInput}
+                            onChange={(e) => setSavingsInput(e.target.value)}
+                            className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl pl-8 pr-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/40 text-zinc-950 dark:text-zinc-100"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = Math.max(0, (parseFloat(savingsInput) || 0) - 50);
+                            setSavingsInput(val.toString());
+                          }}
+                          className="px-2.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 text-xs font-bold font-mono"
+                        >
+                          -50
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = (parseFloat(savingsInput) || 0) + 50;
+                            setSavingsInput(val.toString());
+                          }}
+                          className="px-2.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 text-xs font-bold font-mono"
+                        >
+                          +50
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Simulated Income Override (Loot) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest flex justify-between">
+                        <span>Target/Simulated Income (Loot)</span>
+                        <span className="text-zinc-500 font-normal">Base: ${recurringIncomeTotal.toFixed(0)}</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs font-mono font-bold">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder={`Simulate income (or default: $${recurringIncomeTotal.toFixed(0)})`}
+                          value={incomeInput}
+                          onChange={(e) => setIncomeInput(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl pl-8 pr-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/40 text-zinc-950 dark:text-zinc-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Simulated Expense Override (Upkeep) */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest flex justify-between">
+                        <span>Target/Simulated Expense (Upkeep)</span>
+                        <span className="text-zinc-500 font-normal">Base: ${recurringExpenseTotal.toFixed(0)}</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs font-mono font-bold">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder={`Simulate expenses (or default: $${recurringExpenseTotal.toFixed(0)})`}
+                          value={expenseInput}
+                          onChange={(e) => setExpenseInput(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-[#070708] border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl pl-8 pr-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/40 text-zinc-950 dark:text-zinc-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Allowance Summary (Supplies - Read-only total) */}
+                    <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/40 dark:border-zinc-800/40 rounded-xl p-3.5">
+                      <div>
+                        <p className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest">
+                          Adventuring Supplies (Allowances Total)
+                        </p>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          Sum of allowance caps converted to {PERIOD_LABELS[period]}
+                        </p>
+                      </div>
+                      <p className="text-sm font-black font-mono text-zinc-900 dark:text-white">
+                        ${plannerAllowanceTotal.toFixed(2)}
+                      </p>
+                    </div>
+
+                    {plannerError && (
+                      <p className="text-xs text-rose-500 font-bold bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/50 dark:border-rose-900/35 px-3 py-2 rounded-xl">
+                        ⚠️ {plannerError}
+                      </p>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={plannerSaving}
+                      className="w-full flex items-center justify-center gap-1.5 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs transition-all active:scale-95 shadow-md shadow-amber-500/20 disabled:opacity-50 font-sans"
+                    >
+                      <Lock size={13} />
+                      {plannerSaving ? 'Committing to Vault...' : 'Save Quest Parameters'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Right Side: Quest Status & Results */}
+                <div className="space-y-5 h-full flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-amber-500 uppercase tracking-wider flex items-center gap-1.5 mb-3">
+                      <Trophy className="w-3.5 h-3.5" />
+                      Quest Status & Outcomes
+                    </h3>
+
+                    {/* Dynamic Quest Status banner */}
+                    {plannerDeficit > 0 ? (
+                      <div className="rounded-2xl border border-rose-200/60 dark:border-rose-900/30 bg-rose-50/50 dark:bg-rose-950/20 p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xl">🚨</span>
+                          <h4 className="font-extrabold text-sm text-rose-600 dark:text-rose-400">Quest Status: Under Siege!</h4>
+                        </div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                          Your loot is insufficient to cover basic upkeep, allowances, and savings goals. You need to gather{' '}
+                          <span className="font-black text-rose-500 font-mono">${plannerDeficit.toFixed(2)} more gold</span> to break even this {PERIOD_LABELS[period]}!
+                        </p>
+                      </div>
+                    ) : plannerPotentialSavings < targetSavingsVal ? (
+                      <div className="rounded-2xl border border-amber-200/60 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-950/20 p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xl">⚠️</span>
+                          <h4 className="font-extrabold text-sm text-amber-600 dark:text-amber-400">Quest Status: Savings Shortage!</h4>
+                        </div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                          Your loot covers upkeep and allowances, but your Vault Savings goal is short by{' '}
+                          <span className="font-black text-amber-500 font-mono">${(targetSavingsVal - plannerPotentialSavings).toFixed(2)}</span>. Gather more loot or decrease upkeep to achieve full savings potential!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-emerald-200/60 dark:border-emerald-900/30 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 mb-4">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xl">🏆</span>
+                          <h4 className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">Quest Status: Victory!</h4>
+                        </div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                          Loot flows abundantly! Your income easily covers upkeep, allowances, and your vault savings goal. The fortress treasury is growing.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Progress Bar (Gold Income vs Needed Outflow) */}
+                    <div className="space-y-2 mb-4 bg-zinc-50 dark:bg-zinc-900/20 border border-zinc-200/30 dark:border-zinc-800/40 rounded-2xl p-4">
+                      <div className="flex justify-between text-xs font-bold font-mono">
+                        <span className="text-zinc-500 dark:text-zinc-400">Outflow Needed: ${totalPlannerNeeded.toFixed(0)}</span>
+                        <span className="text-amber-500">Loot Available: ${plannedIncomeVal.toFixed(0)}</span>
+                      </div>
+                      <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-300/40 dark:border-zinc-700/40">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r ${
+                            plannedIncomeVal >= totalPlannerNeeded
+                              ? 'from-amber-400 to-yellow-500'
+                              : 'from-rose-500 to-red-600'
+                          }`}
+                          style={{
+                            width: `${Math.min(100, totalPlannerNeeded > 0 ? (plannedIncomeVal / totalPlannerNeeded) * 100 : 0)}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-zinc-400">
+                        {plannedIncomeVal >= totalPlannerNeeded
+                          ? '🛡️ Fortress treasury is secure'
+                          : `⚠️ Deficit of $${plannerDeficit.toFixed(0)} detected`}
+                      </p>
+                    </div>
+
+                    {/* 4 Stat Cards */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-zinc-50 dark:bg-zinc-900/20 rounded-2xl p-3.5 border border-zinc-200/30 dark:border-zinc-800/40">
+                        <p className="text-[9px] font-extrabold text-zinc-400 uppercase tracking-widest mb-1">
+                          Simulated Income
+                        </p>
+                        <p className="text-sm font-black font-mono text-emerald-500">
+                          ${plannedIncomeVal.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="bg-zinc-50 dark:bg-zinc-900/20 rounded-2xl p-3.5 border border-zinc-200/30 dark:border-zinc-800/40">
+                        <p className="text-[9px] font-extrabold text-zinc-400 uppercase tracking-widest mb-1">
+                          Total Needed
+                        </p>
+                        <p className="text-sm font-black font-mono text-rose-500">
+                          ${totalPlannerNeeded.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="bg-zinc-50 dark:bg-zinc-900/20 rounded-2xl p-3.5 border border-zinc-200/30 dark:border-zinc-800/40">
+                        <p className="text-[9px] font-extrabold text-zinc-400 uppercase tracking-widest mb-1">
+                          Vault Savings Potential
+                        </p>
+                        <p className="text-sm font-black font-mono text-indigo-500">
+                          ${plannerPotentialSavings.toFixed(2)}
+                        </p>
+                      </div>
+
+                      <div className="bg-zinc-50 dark:bg-zinc-900/20 rounded-2xl p-3.5 border border-zinc-200/30 dark:border-zinc-800/40">
+                        <p className="text-[9px] font-extrabold text-zinc-400 uppercase tracking-widest mb-1">
+                          Available Spending Gold
+                        </p>
+                        <p className="text-sm font-black font-mono text-amber-500">
+                          ${plannerAvailableSpending.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -97,6 +97,9 @@ const backfillProfile = (data: Record<string, unknown>): UserProfile => {
     recurringExpenses: (data.recurringExpenses as RecurringItem[]) || [],
     recurringIncome: (data.recurringIncome as RecurringItem[]) || [],
     allowances,
+    targetSavings: (data.targetSavings as number) || 0,
+    customIncomeOverride: (data.customIncomeOverride as number) || 0,
+    customExpenseOverride: (data.customExpenseOverride as number) || 0,
     createdAt: (data.createdAt as string) || new Date().toISOString(),
   };
 };
