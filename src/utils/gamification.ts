@@ -28,6 +28,8 @@ export interface UserProfile {
   activeAvatarFrame: string;
   recurringExpenses: RecurringItem[];
   recurringIncome: RecurringItem[];
+  weeklyTravelAllowance?: number;
+  weeklyFoodAllowance?: number;
   createdAt: string;
 }
 

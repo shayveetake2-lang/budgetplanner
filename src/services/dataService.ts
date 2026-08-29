@@ -51,6 +51,8 @@ const buildDefaultProfile = (uid: string, email: string, username: string): User
   activeAvatarFrame: 'frame_none',
   recurringExpenses: [],
   recurringIncome: [],
+  weeklyTravelAllowance: 100,
+  weeklyFoodAllowance: 200,
   createdAt: new Date().toISOString(),
 });
 
@@ -74,6 +76,8 @@ const backfillProfile = (data: Record<string, unknown>): UserProfile => ({
   activeAvatarFrame: (data.activeAvatarFrame as string) || 'frame_none',
   recurringExpenses: (data.recurringExpenses as RecurringItem[]) || [],
   recurringIncome: (data.recurringIncome as RecurringItem[]) || [],
+  weeklyTravelAllowance: typeof data.weeklyTravelAllowance === 'number' ? data.weeklyTravelAllowance : 100,
+  weeklyFoodAllowance: typeof data.weeklyFoodAllowance === 'number' ? data.weeklyFoodAllowance : 200,
   createdAt: (data.createdAt as string) || new Date().toISOString(),
 });
 

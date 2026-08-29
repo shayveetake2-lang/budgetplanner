@@ -19,7 +19,7 @@ import {
   Sparkles, DollarSign, Settings, Shield, Lock, Sword, Crown, Gem,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ShoppingBag,
   Check, TrendingUp, TrendingDown, User, LayoutDashboard, History,
-  Star, X,
+  Star, X, Car, Utensils, Edit3, PieChart,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { RecurringSection } from './RecurringSection';
@@ -70,6 +70,12 @@ export const Dashboard: React.FC = () => {
   // Budget settings
   const [showBudgetSettings, setShowBudgetSettings] = useState(false);
   const [budgetLimitInput, setBudgetLimitInput] = useState('');
+
+  // Allowance edit modal state
+  const [showAllowanceModal, setShowAllowanceModal] = useState(false);
+  const [travelInput, setTravelInput] = useState('');
+  const [foodInput, setFoodInput] = useState('');
+  const [savingAllowances, setSavingAllowances] = useState(false);
 
   // Pagination & filter
   const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -147,6 +153,40 @@ export const Dashboard: React.FC = () => {
     hpStatusText = 'Wounded 🟡';
   }
 
+  // ------------------------------------------------------------------
+  // Weekly Allowances Math
+  // ------------------------------------------------------------------
+  const { start: weekStart, end: weekEnd } = getPeriodDateRange('weekly');
+
+  const weeklyTravelAllowance = userProfile.weeklyTravelAllowance ?? 100;
+  const weeklyFoodAllowance = userProfile.weeklyFoodAllowance ?? 200;
+
+  const weeklyTravelSpent = transactions
+    .filter((t) =>
+      t.type === 'expense' &&
+      (t.category.toLowerCase().includes('transport') ||
+       t.category.toLowerCase().includes('gas') ||
+       t.category.toLowerCase().includes('travel')) &&
+      t.date >= weekStart && t.date <= weekEnd
+    )
+    .reduce((s, t) => s + t.amount, 0);
+
+  const weeklyFoodSpent = transactions
+    .filter((t) =>
+      t.type === 'expense' &&
+      (t.category.toLowerCase().includes('food') ||
+       t.category.toLowerCase().includes('rations') ||
+       t.category.toLowerCase().includes('groceries')) &&
+      t.date >= weekStart && t.date <= weekEnd
+    )
+    .reduce((s, t) => s + t.amount, 0);
+
+  const travelRemaining = Math.max(0, weeklyTravelAllowance - weeklyTravelSpent);
+  const foodRemaining = Math.max(0, weeklyFoodAllowance - weeklyFoodSpent);
+
+  const travelPct = weeklyTravelAllowance > 0 ? Math.min(100, (weeklyTravelSpent / weeklyTravelAllowance) * 100) : 0;
+  const foodPct = weeklyFoodAllowance > 0 ? Math.min(100, (weeklyFoodSpent / weeklyFoodAllowance) * 100) : 0;
+
   // XP
   const xpNeeded = getXpNeededForLevel(userProfile.level);
   const xpPct = Math.min(100, (userProfile.xp / xpNeeded) * 100);
@@ -154,6 +194,18 @@ export const Dashboard: React.FC = () => {
   // Categories
   const incomeCategories = ['Loot / Salary', 'Freelance', 'Investment', 'Gift', 'Side Income', 'Other'];
   const expenseCategories = ['Food / Rations', 'Entertainment', 'Transport', 'Shopping / Gear', 'Rent / Inn', 'Health', 'Utilities', 'Other'];
+
+  // Spent Category Breakdown for Active Period
+  const categoryBreakdown = expenseCategories.map((cat) => {
+    const amt = transactions
+      .filter((t) => t.type === 'expense' && t.category === cat && t.date >= pStart && t.date <= pEnd)
+      .reduce((sum, t) => sum + t.amount, 0);
+    return {
+      category: cat,
+      amount: amt,
+      pct: periodTransactionExpenses > 0 ? (amt / periodTransactionExpenses) * 100 : 0
+    };
+  }).filter(c => c.amount > 0);
 
   // ------------------------------------------------------------------
   // Period toggle
@@ -172,6 +224,33 @@ export const Dashboard: React.FC = () => {
     await updateProfile({ budgetLimit: v });
     setShowBudgetSettings(false);
     setBudgetLimitInput('');
+  };
+
+  // ------------------------------------------------------------------
+  // Allowances save
+  // ------------------------------------------------------------------
+  const handleSaveAllowances = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingAllowances(true);
+    try {
+      const tVal = parseFloat(travelInput);
+      const fVal = parseFloat(foodInput);
+      const updates: Partial<UserProfile> = {};
+      if (!isNaN(tVal) && tVal >= 0) updates.weeklyTravelAllowance = tVal;
+      if (!isNaN(fVal) && fVal >= 0) updates.weeklyFoodAllowance = fVal;
+      await updateProfile(updates);
+      setShowAllowanceModal(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save allowances.');
+    } finally {
+      setSavingAllowances(false);
+    }
+  };
+
+  const openAllowanceModal = () => {
+    setTravelInput(weeklyTravelAllowance.toString());
+    setFoodInput(weeklyFoodAllowance.toString());
+    setShowAllowanceModal(true);
   };
 
   // ------------------------------------------------------------------
@@ -334,7 +413,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Logo */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+            <span className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]">
               <Shield className="w-5 h-5" />
             </span>
             <span className="text-lg font-black tracking-tight text-zinc-950 dark:text-zinc-50">
@@ -395,7 +474,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div className="h-2.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500"
+                  className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full transition-all duration-500"
                   style={{ width: `${xpPct}%` }}
                 />
               </div>
@@ -403,7 +482,7 @@ export const Dashboard: React.FC = () => {
 
             {/* Gold coins */}
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400">
+              <div className="p-2 rounded-xl bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
                 <Coins className="w-4 h-4" />
               </div>
               <div>
@@ -414,7 +493,7 @@ export const Dashboard: React.FC = () => {
 
             {/* Streak */}
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-orange-100 dark:bg-orange-950/30 text-orange-500">
+              <div className="p-2 rounded-xl bg-orange-100 dark:bg-orange-950/30 text-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.2)]">
                 <Flame className="w-4 h-4" />
               </div>
               <div>
@@ -433,7 +512,7 @@ export const Dashboard: React.FC = () => {
         {activeTab === 'dashboard' && (
           <div className="space-y-5">
 
-            {/* Budget HP Card */}
+            {/* 1. Budget HP Card */}
             <div className={`bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5 transition-all ${hpGlowClass}`}>
 
               {/* Title + period toggle + settings */}
@@ -441,10 +520,10 @@ export const Dashboard: React.FC = () => {
                 <div>
                   <h2 className="text-base font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                     <Shield className="w-4 h-4 text-emerald-500" />
-                    Budget HP — <span className="text-zinc-500 dark:text-zinc-400 font-semibold text-sm">{hpStatusText}</span>
+                    Budget HP Tracker — <span className="text-zinc-500 dark:text-zinc-400 font-semibold text-sm">{hpStatusText}</span>
                   </h2>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    {pStart} → {pEnd}
+                    Active Window: {pStart} → {pEnd}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -466,6 +545,7 @@ export const Dashboard: React.FC = () => {
                   <button
                     onClick={() => setShowBudgetSettings(!showBudgetSettings)}
                     className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                    title="Change Budget Limit"
                   >
                     <Settings className="w-4 h-4" />
                   </button>
@@ -495,7 +575,7 @@ export const Dashboard: React.FC = () => {
 
               {/* HP bar */}
               <div className="space-y-3">
-                <div className="w-full h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl overflow-hidden relative flex items-center border border-zinc-300 dark:border-zinc-700">
+                <div className="w-full h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl overflow-hidden relative flex items-center border border-zinc-300 dark:border-zinc-700 shadow-inner">
                   <div
                     className={`h-full rounded-xl transition-all duration-700 ${hpBarColor}`}
                     style={{ width: `${hpPct}%` }}
@@ -513,10 +593,10 @@ export const Dashboard: React.FC = () => {
                 {/* 4-stat mini grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { label: 'Period Spent', value: `$${periodTransactionExpenses.toFixed(2)}`, color: 'text-rose-500' },
-                    { label: 'Recurring Costs', value: `$${recurringExpenseTotal.toFixed(2)}`, color: 'text-orange-500' },
-                    { label: 'Period Earned', value: `$${periodTransactionIncome.toFixed(2)}`, color: 'text-emerald-500' },
-                    { label: 'Recurring Income', value: `$${recurringIncomeTotal.toFixed(2)}`, color: 'text-blue-500' },
+                    { label: 'Amount Spent', value: `$${periodTransactionExpenses.toFixed(2)}`, color: 'text-rose-500' },
+                    { label: 'Base Expenses', value: `$${recurringExpenseTotal.toFixed(2)}`, color: 'text-orange-500' },
+                    { label: 'Logged Income', value: `$${periodTransactionIncome.toFixed(2)}`, color: 'text-emerald-500' },
+                    { label: 'Base Income', value: `$${recurringIncomeTotal.toFixed(2)}`, color: 'text-blue-500' },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="bg-zinc-50 dark:bg-zinc-900/40 rounded-xl p-3 border border-zinc-100 dark:border-zinc-800/80 text-center">
                       <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase">{label}</p>
@@ -527,7 +607,132 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Recurring sections */}
+            {/* 2. DEDICATED ALLOWANCE SECTIONS (Weekly Travel & Weekly Food) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Travel Allowance Widget */}
+              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-sky-200 dark:border-sky-900/40 shadow-sm p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.3)]">
+                      <Car className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Weekly Travel Allowance</h4>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Gas, Transit, Travel &amp; Fuel</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={openAllowanceModal}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/20 transition-all"
+                    title="Edit Allowance"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="space-y-1.5 mt-3">
+                  <div className="flex justify-between text-xs font-mono font-bold">
+                    <span className="text-sky-600 dark:text-sky-400">Spent: ${weeklyTravelSpent.toFixed(2)}</span>
+                    <span className="text-zinc-500">Cap: ${weeklyTravelAllowance.toFixed(2)}/wk</span>
+                  </div>
+                  <div className="h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        travelPct >= 100 ? 'bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
+                        travelPct >= 80 ? 'bg-amber-500' :
+                        'bg-gradient-to-r from-sky-400 to-blue-500 shadow-[0_0_8px_rgba(56,189,248,0.4)]'
+                      }`}
+                      style={{ width: `${travelPct}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+                    <span>{travelRemaining > 0 ? `🛡️ $${travelRemaining.toFixed(2)} remaining this week` : '⚠️ Allowance exceeded!'}</span>
+                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{Math.round(travelPct)}% used</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Food Allowance Widget */}
+              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-amber-200 dark:border-amber-900/40 shadow-sm p-4 relative overflow-hidden">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.3)]">
+                      <Utensils className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-black text-zinc-900 dark:text-zinc-100">Weekly Food Allowance</h4>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Groceries, Dining &amp; Rations</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={openAllowanceModal}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-all"
+                    title="Edit Allowance"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="space-y-1.5 mt-3">
+                  <div className="flex justify-between text-xs font-mono font-bold">
+                    <span className="text-amber-600 dark:text-amber-400">Spent: ${weeklyFoodSpent.toFixed(2)}</span>
+                    <span className="text-zinc-500">Cap: ${weeklyFoodAllowance.toFixed(2)}/wk</span>
+                  </div>
+                  <div className="h-3 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        foodPct >= 100 ? 'bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
+                        foodPct >= 80 ? 'bg-amber-500' :
+                        'bg-gradient-to-r from-amber-400 to-orange-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
+                      }`}
+                      style={{ width: `${foodPct}%` }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+                    <span>{foodRemaining > 0 ? `🥖 $${foodRemaining.toFixed(2)} remaining this week` : '⚠️ Allowance exceeded!'}</span>
+                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{Math.round(foodPct)}% used</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. DETAILED SPENT BREAKDOWN ACCORDION */}
+            {categoryBreakdown.length > 0 && (
+              <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-purple-500" />
+                    Spent Breakdown ({PERIOD_LABELS[period]})
+                  </h3>
+                  <span className="text-xs font-mono font-bold text-rose-500">
+                    Total: ${periodTransactionExpenses.toFixed(2)}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {categoryBreakdown.map((item) => (
+                    <div key={item.category} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="font-semibold text-zinc-700 dark:text-zinc-300">{item.category}</span>
+                        <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                          ${item.amount.toFixed(2)} <span className="text-zinc-400 font-normal">({Math.round(item.pct)}%)</span>
+                        </span>
+                      </div>
+                      <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full transition-all duration-500"
+                          style={{ width: `${item.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 4. Recurring Base Sections */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <RecurringSection
                 type="income"
@@ -545,7 +750,7 @@ export const Dashboard: React.FC = () => {
               />
             </div>
 
-            {/* Add transaction form */}
+            {/* 5. Add transaction form */}
             <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
               <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 mb-4 flex items-center gap-2">
                 <Sword className="w-4 h-4 text-blue-500" />
@@ -733,7 +938,7 @@ export const Dashboard: React.FC = () => {
         {activeTab === 'achievements' && (
           <div className="bg-white dark:bg-[#0c0c0f] rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm p-5">
             <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 mb-1 flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-yellow-500" /> Achievements
+              <Trophy className="w-4 h-4 text-yellow-500" /> Quests &amp; Achievements
             </h3>
             <p className="text-xs text-zinc-500 mb-4">{userProfile.unlockedAchievements.length} / {ACHIEVEMENTS.length} unlocked</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -875,6 +1080,75 @@ export const Dashboard: React.FC = () => {
           </button>
         ))}
       </nav>
+
+      {/* ───── ALLOWANCES EDIT MODAL ───── */}
+      {showAllowanceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/70 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-white dark:bg-[#0c0c0f] border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-2xl relative">
+            <button onClick={() => setShowAllowanceModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-2 rounded-xl bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400">
+                <Settings className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-zinc-950 dark:text-zinc-50">Configure Allowances</h3>
+                <p className="text-xs text-zinc-500">Weekly spending caps</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveAllowances} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Car className="w-3.5 h-3.5 text-sky-500" /> Weekly Travel Allowance ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="100.00"
+                  value={travelInput}
+                  onChange={(e) => setTravelInput(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-zinc-950 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Utensils className="w-3.5 h-3.5 text-amber-500" /> Weekly Food Allowance ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="200.00"
+                  value={foodInput}
+                  onChange={(e) => setFoodInput(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-[#09090b] border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-zinc-950 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={savingAllowances}
+                  className="flex-1 py-3 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow disabled:opacity-50"
+                >
+                  {savingAllowances ? 'Saving...' : 'Save Allowances'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllowanceModal(false)}
+                  className="px-4 py-3 text-xs font-bold rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ───── LEVEL UP MODAL ───── */}
       {showLevelUpModal && (
