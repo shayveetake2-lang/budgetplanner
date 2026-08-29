@@ -427,7 +427,7 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* ───── MAIN CONTENT ───── */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-24 md:pb-8">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8">
 
         {/* ─── DASHBOARD TAB ─── */}
         {activeTab === 'dashboard' && (
@@ -855,7 +855,7 @@ export const Dashboard: React.FC = () => {
       </main>
 
       {/* ───── MOBILE BOTTOM NAV ───── */}
-      <nav className="fixed bottom-0 inset-x-0 md:hidden z-30 bg-white/95 dark:bg-[#0c0c0f]/95 backdrop-blur border-t border-zinc-200 dark:border-zinc-800 flex justify-around py-2 px-2">
+      <nav className="fixed bottom-0 inset-x-0 md:hidden z-30 bg-white/95 dark:bg-[#0c0c0f]/95 backdrop-blur border-t border-zinc-200 dark:border-zinc-800 flex justify-around pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] px-2 shadow-lg">
         {([
           { tab: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Home' },
           { tab: 'history', icon: <History className="w-5 h-5" />, label: 'History' },
