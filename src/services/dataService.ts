@@ -46,7 +46,7 @@ const buildDefaultProfile = (uid: string, email: string, username: string): User
   username,
   level: 1,
   xp: 0,
-  coins: 100,
+  coins: 200,
   budgetPeriod: 'monthly',
   budgetLimit: 1000,
   streak: 1,
